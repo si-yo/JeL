@@ -2,6 +2,13 @@
 
 Editeur de notebooks Jupyter standalone, avec collaboration P2P en temps reel, gestion de packages Python, et interface mobile.
 
+## requirements
+- Node.js : https://nodejs.org/
+- python 3 (privilégier 3.10) : https://www.python.org
+- Jupyter Lab : https://jupyter.org/
+- IPFS (interplanetary filesystem on p2p based) : https://docs.ipfs.tech/install/command-line/#install-official-binary-distributions
+
+
 ## Stack technique
 
 | Couche | Technologie |
