@@ -1,0 +1,47 @@
+{
+  "name": "lab",
+  "version": "1.0.0",
+  "description": "Lab - Editeur Jupyter Notebook",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build:renderer": "vite build",
+    "build:mobile": "cd mobile && npm install && npx vite build",
+    "build:all": "vite build && cd mobile && npm install && npx vite build",
+    "build": "npm run build:all && electron-builder --publish never",
+    "build:mac": "npm run build:all && electron-builder --mac --publish never"
+  },
+  "author": "siyo",
+  "license": "MIT",
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.17",
+    "@types/marked": "^5.0.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@types/uuid": "^10.0.0",
+    "@vitejs/plugin-react": "^5.1.1",
+    "electron": "^33.0.0",
+    "electron-builder": "^26.6.0",
+    "tailwindcss": "^4.1.17",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4"
+  },
+  "dependencies": {
+    "@codemirror/lang-markdown": "^6.3.2",
+    "@codemirror/lang-python": "^6.1.6",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.36.5",
+    "clsx": "^2.1.1",
+    "codemirror": "^6.0.1",
+    "lucide-react": "^0.563.0",
+    "marked": "^17.0.1",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "tailwind-merge": "^3.4.0",
+    "uuid": "^13.0.0",
+    "ws": "^8.19.0",
+    "zustand": "^5.0.10"
+  }
+}
