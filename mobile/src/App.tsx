@@ -92,12 +92,50 @@ export function App() {
 
         case 'cell-output': {
           const { notebookId, cellId, output } = evt as { notebookId: string; cellId: string; output: unknown; event: string };
+          setRunningCells((prev) => new Set(prev).add(cellId));
+          setKernelBusy(true);
           setCurrentNotebook((prev) => {
             if (!prev || prev.id !== notebookId) return prev;
             return {
               ...prev,
               cells: prev.cells.map((c) =>
                 c.id === cellId ? { ...c, outputs: [...c.outputs, output as CellOutput] } : c
+              ),
+            };
+          });
+          break;
+        }
+
+        case 'cell-clear': {
+          const { notebookId, cellId } = evt as { notebookId: string; cellId: string; event: string };
+          setRunningCells((prev) => new Set(prev).add(cellId));
+          setKernelBusy(true);
+          setCurrentNotebook((prev) => {
+            if (!prev || prev.id !== notebookId) return prev;
+            return {
+              ...prev,
+              cells: prev.cells.map((c) =>
+                c.id === cellId ? { ...c, outputs: [], execution_count: null } : c
+              ),
+            };
+          });
+          break;
+        }
+
+        case 'cell-execution-count': {
+          const { notebookId, cellId, executionCount } = evt as { notebookId: string; cellId: string; executionCount: number; event: string };
+          setRunningCells((prev) => {
+            const next = new Set(prev);
+            next.delete(cellId);
+            return next;
+          });
+          setKernelBusy(false);
+          setCurrentNotebook((prev) => {
+            if (!prev || prev.id !== notebookId) return prev;
+            return {
+              ...prev,
+              cells: prev.cells.map((c) =>
+                c.id === cellId ? { ...c, execution_count: executionCount } : c
               ),
             };
           });

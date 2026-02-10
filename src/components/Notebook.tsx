@@ -256,13 +256,24 @@ export function Notebook() {
       for (let i = 0; i < nb.data.cells.length; i++) {
         const cell = nb.data.cells[i];
         const prevCell = prevNb.data.cells.find((c) => c.id === cell.id);
-        if (prevCell && cell.outputs !== prevCell.outputs && cell.outputs.length > prevCell.outputs.length) {
+        if (!prevCell) continue;
+        // Broadcast new outputs
+        if (cell.outputs !== prevCell.outputs && cell.outputs.length > prevCell.outputs.length) {
           const newOutput = cell.outputs[cell.outputs.length - 1];
           window.labAPI.bridge.broadcast({
             event: 'cell-output',
             notebookId: nbId,
             cellId: cell.id,
             output: newOutput,
+          });
+        }
+        // Broadcast execution count changes
+        if (cell.execution_count !== prevCell.execution_count && cell.execution_count != null) {
+          window.labAPI.bridge.broadcast({
+            event: 'cell-execution-count',
+            notebookId: nbId,
+            cellId: cell.id,
+            executionCount: cell.execution_count,
           });
         }
       }

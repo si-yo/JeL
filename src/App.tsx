@@ -345,9 +345,18 @@ export default function App() {
           break;
         }
         case 'run-cell': {
-          // Forward to Notebook component via a global event
           const { notebookId, cellId } = req as { notebookId: string; cellId: string; action: string; wsId: number };
-          window.dispatchEvent(new CustomEvent('bridge:run-cell', { detail: { notebookId, cellId } }));
+          // Ensure this notebook is the active one so Notebook.tsx can handle execution
+          const activeNbId = state.activeNotebookId;
+          if (activeNbId !== notebookId) {
+            state.setActiveNotebook(notebookId);
+          }
+          // Broadcast clear outputs to mobile before execution
+          window.labAPI.bridge.broadcast({ event: 'cell-clear', notebookId, cellId });
+          // Forward to Notebook component via a global event
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('bridge:run-cell', { detail: { notebookId, cellId } }));
+          }, 50);
           break;
         }
         case 'add-cell': {
