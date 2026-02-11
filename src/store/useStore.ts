@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { OpenNotebook, Cell, CellOutput, KernelState, Project, FavoriteProject, Peer, ShareManifest, SwarmKeyEntry } from '../types';
+import type { OpenNotebook, Cell, CellOutput, KernelState, Project, FavoriteProject, Peer, ShareManifest, SwarmKeyEntry, SoaServiceInfo } from '../types';
 import { createEmptyNotebook, createCell } from '../utils/notebook';
 
 // Remote update guard — prevents re-broadcasting incoming peer edits
@@ -65,6 +65,11 @@ interface LabStore {
 
   // Editor
   autocompleteEnabled: boolean;
+
+  // SOA
+  soaEnabled: boolean;
+  soaRunningServices: SoaServiceInfo[];
+  soaAvailableServices: SoaServiceInfo[];
 
   // Kernel states (per notebook)
   kernelStates: Record<string, KernelState>;
@@ -140,6 +145,14 @@ interface LabStore {
   // Actions - Editor
   setAutocompleteEnabled: (enabled: boolean) => void;
 
+  // Actions - SOA
+  setSoaEnabled: (enabled: boolean) => void;
+  addSoaRunningService: (service: SoaServiceInfo) => void;
+  removeSoaRunningService: (name: string) => void;
+  updateSoaAvailableService: (service: SoaServiceInfo) => void;
+  removeSoaAvailableService: (name: string, peerId: string) => void;
+  clearSoaServices: () => void;
+
   // Helpers
   createNewNotebook: () => string;
   getActiveNotebook: () => OpenNotebook | undefined;
@@ -170,6 +183,9 @@ export const useStore = create<LabStore>((set, get) => ({
   savedPeerAddrs: JSON.parse(localStorage.getItem('lab:peerAddrs') || '[]'),
   remoteCursors: {},
   autocompleteEnabled: true,
+  soaEnabled: false,
+  soaRunningServices: [],
+  soaAvailableServices: [],
 
   // Notebook actions
   addNotebook: (nb) =>
@@ -578,6 +594,39 @@ export const useStore = create<LabStore>((set, get) => ({
 
   // Editor actions
   setAutocompleteEnabled: (enabled) => set({ autocompleteEnabled: enabled }),
+
+  // SOA actions
+  setSoaEnabled: (enabled) => set({ soaEnabled: enabled }),
+
+  addSoaRunningService: (service) =>
+    set((s) => {
+      const idx = s.soaRunningServices.findIndex((svc) => svc.name === service.name);
+      if (idx >= 0) {
+        const next = [...s.soaRunningServices];
+        next[idx] = service;
+        return { soaRunningServices: next };
+      }
+      return { soaRunningServices: [...s.soaRunningServices, service] };
+    }),
+
+  removeSoaRunningService: (name) =>
+    set((s) => ({ soaRunningServices: s.soaRunningServices.filter((svc) => svc.name !== name) })),
+
+  updateSoaAvailableService: (service) =>
+    set((s) => {
+      const idx = s.soaAvailableServices.findIndex((svc) => svc.name === service.name && svc.peerId === service.peerId);
+      if (idx >= 0) {
+        const next = [...s.soaAvailableServices];
+        next[idx] = service;
+        return { soaAvailableServices: next };
+      }
+      return { soaAvailableServices: [...s.soaAvailableServices, service] };
+    }),
+
+  removeSoaAvailableService: (name, peerId) =>
+    set((s) => ({ soaAvailableServices: s.soaAvailableServices.filter((svc) => !(svc.name === name && svc.peerId === peerId)) })),
+
+  clearSoaServices: () => set({ soaRunningServices: [], soaAvailableServices: [], soaEnabled: false }),
 
   // Helpers
   createNewNotebook: () => {

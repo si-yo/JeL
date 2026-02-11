@@ -15,9 +15,10 @@ import type { KernelState, CellOutput, NotebookLink } from '../types';
 import { KernelService } from '../services/kernelService';
 import { getCollab, broadcastCursor } from '../services/collabBridge';
 import { useHistoryStore } from '../store/useHistoryStore';
-import { resolveUse, hasUse, resolveAsk, hasAsk } from '../utils/notebookImport';
+import { resolveUse, hasUse, resolveAsk, hasAsk, hasSoa, resolveSoa } from '../utils/notebookImport';
 import { setCellClipboard, getCellClipboard } from '../services/cellClipboard';
 import { createCell } from '../utils/notebook';
+import { ShellConfirmModal, type ShellCellInfo } from './ShellConfirmModal';
 
 // Keep kernel services per notebook
 const kernelServices = new Map<string, KernelService>();
@@ -63,6 +64,14 @@ export function Notebook() {
   const [showCellPanel, setShowCellPanel] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [pendingShell, setPendingShell] = useState<{
+    cellId: string;
+    mode: 'command' | 'run';
+    command?: string;
+    isFromExternal?: boolean;
+    cells?: ShellCellInfo[];
+    selectedCellIds: Set<string>;
+  } | null>(null);
   const [showCodeCellIds, setShowCodeCellIds] = useState<Set<string>>(() => {
     try {
       const key = notebook?.filePath ? `jel:showCode:${notebook.filePath}` : null;
@@ -216,6 +225,65 @@ export function Notebook() {
         if (collab) {
           codeToRun = await resolveAsk(codeToRun, collab.codeShare);
         }
+      }
+
+      // Resolve %soa directives (SOA service management)
+      if (hasSoa(codeToRun) && store.getState().soaEnabled) {
+        const { getSoaService } = await import('../services/soaService');
+        const soaSvc = getSoaService();
+        if (soaSvc) {
+          codeToRun = await resolveSoa(codeToRun, soaSvc, {
+            currentNotebookPath: nb?.filePath ?? null,
+            projectPath: project?.path ?? null,
+          });
+        }
+      }
+
+      // Detect shell commands (! prefix) — after %use/%ask/%soa resolution
+      const trimmedCode = codeToRun.trim();
+      if (trimmedCode.startsWith('!')) {
+        // Stop the "running" indicator — modal will handle execution
+        setRunningCells((prev) => { const next = new Set(prev); next.delete(cellId); return next; });
+
+        const firstLine = trimmedCode.split('\n')[0].trim();
+        const cmdPart = firstLine.slice(1).trim();
+        const isFromExternal = cell.source.trim() !== trimmedCode;
+
+        if (cmdPart === 'run' || cmdPart === '') {
+          // !run: collect all code cells above
+          const cells = nb!.data.cells;
+          const idx = cells.findIndex((c) => c.id === cellId);
+          const codeCells: ShellCellInfo[] = cells
+            .slice(0, idx)
+            .map((c, i) => ({ id: c.id, index: i, source: c.source, label: (c.metadata?.label as string) || '' }))
+            .filter((c) => c.source.trim() && !c.source.trim().startsWith('!') && !c.source.trim().startsWith('%'));
+
+          if (codeCells.length === 0) {
+            store.getState().appendCellOutput(nbId, cellId, {
+              output_type: 'error', ename: 'ShellError',
+              evalue: 'Aucune cellule code a executer au-dessus', traceback: [],
+            });
+            return;
+          }
+
+          // Restore previously saved selection or default to all
+          const savedIds = (cell.metadata?.shellCells as string[]) || null;
+          const defaultSelected = savedIds
+            ? new Set(savedIds.filter((id) => codeCells.some((c) => c.id === id)))
+            : new Set(codeCells.map((c) => c.id));
+
+          setPendingShell({
+            cellId, mode: 'run', isFromExternal,
+            cells: codeCells, selectedCellIds: defaultSelected,
+          });
+        } else {
+          // !command: direct shell command
+          setPendingShell({
+            cellId, mode: 'command', command: cmdPart,
+            isFromExternal, selectedCellIds: new Set(),
+          });
+        }
+        return;
       }
 
       ks.executeCode(
@@ -507,6 +575,93 @@ export function Notebook() {
     await window.labAPI.jupyter.stop();
     clearKernelServices();
     store.getState().setJupyterRunning(false);
+  }, []);
+
+  // Shell execution helpers
+  const executeShellCommand = useCallback(async (cellId: string, params: { command?: string; code?: string }) => {
+    if (!nbId) return;
+    store.getState().clearCellOutputs(nbId, cellId);
+    setRunningCells((prev) => new Set(prev).add(cellId));
+
+    const execId = `sh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const projectPath = store.getState().currentProject?.path;
+
+    const cleanup = window.labAPI.shell.onOutput((data) => {
+      if (data.execId !== execId) return;
+      store.getState().appendCellOutput(nbId, cellId, {
+        output_type: 'stream', name: data.stream === 'stderr' ? 'stderr' : 'stdout',
+        text: data.text,
+      });
+    });
+
+    const result = await window.labAPI.shell.execute({
+      ...params, execId, cwd: projectPath || undefined,
+    });
+
+    cleanup();
+
+    if (!result.success && result.error) {
+      store.getState().appendCellOutput(nbId, cellId, {
+        output_type: 'error', ename: 'ShellError', evalue: result.error, traceback: [],
+      });
+    }
+
+    store.getState().appendCellOutput(nbId, cellId, {
+      output_type: 'stream', name: 'stdout',
+      text: `\n[Process exited with code ${result.code ?? (result.success ? 0 : 1)}]\n`,
+    });
+
+    setRunningCells((prev) => { const next = new Set(prev); next.delete(cellId); return next; });
+  }, [nbId]);
+
+  const handleShellAccept = useCallback(() => {
+    if (!pendingShell || !nbId) return;
+    const { cellId, mode, command, cells, selectedCellIds: selIds } = pendingShell;
+
+    if (mode === 'command' && command) {
+      setPendingShell(null);
+      executeShellCommand(cellId, { command });
+    } else if (mode === 'run' && cells) {
+      // Save selection to cell metadata for next time
+      const selectedArr = [...selIds];
+      store.getState().updateCellMetadata(nbId, cellId, { shellCells: selectedArr });
+
+      const code = cells
+        .filter((c) => selIds.has(c.id))
+        .map((c) => c.source)
+        .join('\n\n');
+
+      setPendingShell(null);
+      executeShellCommand(cellId, { code });
+    }
+  }, [pendingShell, nbId, executeShellCommand]);
+
+  const handleShellRefuse = useCallback(() => {
+    setPendingShell(null);
+  }, []);
+
+  const handleShellToggleCell = useCallback((cellId: string) => {
+    setPendingShell((prev) => {
+      if (!prev) return prev;
+      const next = new Set(prev.selectedCellIds);
+      if (next.has(cellId)) next.delete(cellId);
+      else next.add(cellId);
+      return { ...prev, selectedCellIds: next };
+    });
+  }, []);
+
+  const handleShellSelectAll = useCallback(() => {
+    setPendingShell((prev) => {
+      if (!prev?.cells) return prev;
+      return { ...prev, selectedCellIds: new Set(prev.cells.map((c) => c.id)) };
+    });
+  }, []);
+
+  const handleShellDeselectAll = useCallback(() => {
+    setPendingShell((prev) => {
+      if (!prev) return prev;
+      return { ...prev, selectedCellIds: new Set() };
+    });
   }, []);
 
   const focusCellByOffset = useCallback(
@@ -918,6 +1073,22 @@ export function Notebook() {
           hasProject={!!currentProject}
           onExport={handleExportPdf}
           onClose={() => setShowExportDialog(false)}
+        />
+      )}
+
+      {/* Shell confirm modal */}
+      {pendingShell && (
+        <ShellConfirmModal
+          mode={pendingShell.mode}
+          command={pendingShell.command}
+          isFromExternal={pendingShell.isFromExternal}
+          cells={pendingShell.cells}
+          selectedCellIds={pendingShell.selectedCellIds}
+          onToggleCell={handleShellToggleCell}
+          onSelectAll={handleShellSelectAll}
+          onDeselectAll={handleShellDeselectAll}
+          onAccept={handleShellAccept}
+          onRefuse={handleShellRefuse}
         />
       )}
 

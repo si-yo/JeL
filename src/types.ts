@@ -140,6 +140,35 @@ export interface SwarmKeyEntry {
 }
 
 // ===========================================
+// SOA (Service-Oriented Architecture) types
+// ===========================================
+
+export interface SoaEndpoint {
+  name: string;
+  method: string;  // GET | POST | PUT | DELETE
+  path: string;    // e.g. "/data"
+}
+
+export interface SoaServiceInfo {
+  name: string;
+  version: string;
+  peerId: string;
+  peerName: string;
+  notebookPath: string;
+  endpoints: SoaEndpoint[];
+  status: 'running' | 'stopped' | 'error';
+  lastSeen: number;
+}
+
+export interface SoaMessage {
+  type: 'soa-register' | 'soa-unregister' | 'soa-request' | 'soa-response' | 'soa-ping' | 'soa-pong';
+  from: string;
+  serviceName: string;
+  data: unknown;
+  timestamp: number;
+}
+
+// ===========================================
 // Window API types
 // ===========================================
 
@@ -215,6 +244,14 @@ declare global {
         install: (params: { packages: string | string[] }) => Promise<{ success: boolean; output?: string; error?: string; code?: number }>;
         list: () => Promise<{ success: boolean; packages?: Array<{ name: string; version: string }>; error?: string }>;
         onOutput: (callback: (data: { text: string; stream: 'stdout' | 'stderr' }) => void) => () => void;
+      };
+
+      shell: {
+        execute: (params: { command?: string; code?: string; cwd?: string; execId: string }) =>
+          Promise<{ success: boolean; execId: string; code?: number; error?: string }>;
+        kill: (params: { execId: string }) =>
+          Promise<{ success: boolean; error?: string }>;
+        onOutput: (callback: (data: { execId: string; text: string; stream: 'stdout' | 'stderr' }) => void) => () => void;
       };
 
       bridge: {

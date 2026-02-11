@@ -103,6 +103,17 @@ contextBridge.exposeInMainWorld('labAPI', {
     },
   },
 
+  // Shell execution (external scripts)
+  shell: {
+    execute: (params) => ipcRenderer.invoke('shell:execute', params),
+    kill: (params) => ipcRenderer.invoke('shell:kill', params),
+    onOutput: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on('shell:output', listener);
+      return () => ipcRenderer.removeListener('shell:output', listener);
+    },
+  },
+
   // Mobile bridge
   bridge: {
     start: () => ipcRenderer.invoke('bridge:start'),

@@ -126,6 +126,45 @@ async function ensureKernelSpec(venvDir) {
   return true;
 }
 
+function findPython310() {
+  const { execFileSync } = require('child_process');
+  const os = require('os');
+
+  // 1. Check pyenv for an installed 3.10.x
+  const pyenvRoot = process.env.PYENV_ROOT || path.join(os.homedir(), '.pyenv');
+  const pyenvVersionsDir = path.join(pyenvRoot, 'versions');
+  if (fsSync.existsSync(pyenvVersionsDir)) {
+    try {
+      const versions = fsSync.readdirSync(pyenvVersionsDir)
+        .filter(v => v.startsWith('3.10.'))
+        .sort()
+        .reverse(); // latest 3.10.x first
+      if (versions.length > 0) {
+        const pyBin = path.join(pyenvVersionsDir, versions[0], 'bin', 'python3');
+        if (fsSync.existsSync(pyBin)) {
+          console.log(`[Venv] Found Python 3.10 via pyenv: ${pyBin} (${versions[0]})`);
+          return pyBin;
+        }
+      }
+    } catch (_) { /* pyenv dir not readable, continue */ }
+  }
+
+  // 2. Check PATH for python3.10 / python3 / python
+  for (const cmd of ['python3.10', 'python3', 'python']) {
+    try {
+      const ver = execFileSync(cmd, ['--version'], { encoding: 'utf8' }).trim();
+      if (ver.includes('3.10')) {
+        console.log(`[Venv] Found Python 3.10: ${cmd} (${ver})`);
+        return cmd;
+      }
+    } catch (_) { /* not found, try next */ }
+  }
+
+  // Fallback: warn and use python3
+  console.warn('[Venv] Python 3.10 not found (neither pyenv nor PATH), falling back to python3');
+  return 'python3';
+}
+
 async function ensureVenv(projectDir) {
   const venvDir = path.join(projectDir, '.venv');
   currentVenvPath = venvDir;
@@ -139,10 +178,11 @@ async function ensureVenv(projectDir) {
     return { success: true, created: false, path: venvDir };
   }
 
-  console.log('[Venv] Creating:', venvDir);
+  const pythonCmd = findPython310();
+  console.log('[Venv] Creating with', pythonCmd, ':', venvDir);
   if (mainWindow) mainWindow.webContents.send('venv:creating', { path: venvDir });
 
-  const result = await spawnAsync('python3', ['-m', 'venv', venvDir], { env: { ...process.env } });
+  const result = await spawnAsync(pythonCmd, ['-m', 'venv', venvDir], { env: { ...process.env } });
   if (result.code !== 0) {
     console.error('[Venv] Creation failed:', result.stderr);
     currentVenvPath = null;
@@ -381,6 +421,9 @@ app.on('before-quit', () => {
   }
   clearAllPubsub();
   clearVenvState();
+  // Kill shell processes
+  for (const [, proc] of shellProcesses) proc.kill();
+  shellProcesses.clear();
   // Close bridge
   if (bridgeWss) {
     for (const ws of bridgeClients) ws.close();
@@ -568,6 +611,78 @@ ipcMain.handle('pip:list', async () => {
       }
     });
   });
+});
+
+
+// ===========================================
+// Shell Execution (external scripts)
+// ===========================================
+
+const shellProcesses = new Map();
+
+ipcMain.handle('shell:execute', async (_event, { command, code, cwd, execId }) => {
+  const workDir = cwd || currentProjectPath || process.cwd();
+
+  let cmd, args;
+  let tempFile = null;
+
+  if (code) {
+    // Write code to temp file and execute with python
+    tempFile = path.join(os.tmpdir(), `jel-script-${execId}.py`);
+    await fs.writeFile(tempFile, code, 'utf8');
+    cmd = getVenvPython();
+    args = [tempFile];
+  } else if (command) {
+    const parts = command.split(/\s+/);
+    cmd = parts[0];
+    args = parts.slice(1);
+  } else {
+    return { success: false, execId, error: 'No command or code provided' };
+  }
+
+  return new Promise((resolve) => {
+    const proc = spawn(cmd, args, {
+      env: getSpawnEnv(),
+      cwd: workDir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    shellProcesses.set(execId, proc);
+
+    proc.stdout.on('data', (data) => {
+      if (mainWindow) mainWindow.webContents.send('shell:output', {
+        execId, text: data.toString(), stream: 'stdout',
+      });
+    });
+
+    proc.stderr.on('data', (data) => {
+      if (mainWindow) mainWindow.webContents.send('shell:output', {
+        execId, text: data.toString(), stream: 'stderr',
+      });
+    });
+
+    proc.on('error', (error) => {
+      shellProcesses.delete(execId);
+      if (tempFile) fs.unlink(tempFile).catch(() => {});
+      resolve({ success: false, execId, error: error.message });
+    });
+
+    proc.on('exit', (exitCode) => {
+      shellProcesses.delete(execId);
+      if (tempFile) fs.unlink(tempFile).catch(() => {});
+      resolve({ success: exitCode === 0, execId, code: exitCode });
+    });
+  });
+});
+
+ipcMain.handle('shell:kill', async (_event, { execId }) => {
+  const proc = shellProcesses.get(execId);
+  if (proc) {
+    proc.kill();
+    shellProcesses.delete(execId);
+    return { success: true };
+  }
+  return { success: false, error: 'process-not-found' };
 });
 
 

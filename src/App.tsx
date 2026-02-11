@@ -174,24 +174,28 @@ export default function App() {
     });
   }, []);
 
-  // Auto-init/destroy collab when IPFS starts/stops
+  // Auto-init/destroy collab + SOA when IPFS starts/stops
   useEffect(() => {
     const unsub = useStore.subscribe((state, prev) => {
       if (state.ipfsRunning && !prev.ipfsRunning) {
         initCollab().catch(console.error);
+        import('./services/soaService').then(({ initSoa }) => initSoa().catch(console.error));
       } else if (!state.ipfsRunning && prev.ipfsRunning) {
         destroyCollab().catch(console.error);
+        import('./services/soaService').then(({ destroySoa }) => destroySoa().catch(console.error));
       }
     });
 
     // Also check on mount (IPFS may already be running)
     if (useStore.getState().ipfsRunning) {
       initCollab().catch(console.error);
+      import('./services/soaService').then(({ initSoa }) => initSoa().catch(console.error));
     }
 
     return () => {
       unsub();
       destroyCollab().catch(console.error);
+      import('./services/soaService').then(({ destroySoa }) => destroySoa().catch(console.error));
     };
   }, []);
 

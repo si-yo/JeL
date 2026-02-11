@@ -1,6 +1,7 @@
 import { parseNotebook } from './notebook';
 import { validateReceivedCode, wrapUnsafeCode } from './codeSandbox';
 import type { CodeShareService } from '../services/codeShareService';
+import type { SoaServiceInfo } from '../types';
 
 /**
  * Resolves %use directives in cell source code.
@@ -245,4 +246,128 @@ export async function resolveAsk(
   }
 
   return result;
+}
+
+// ===========================================
+// %soa - SOA service management
+// ===========================================
+
+/**
+ * Check if source contains any %soa directives.
+ * Matches: %soa, %soa.call, %soa.stop, %soa.list
+ */
+export function hasSoa(source: string): boolean {
+  return /^%soa[\s.]/m.test(source);
+}
+
+/** Minimal interface for SOA service — avoids importing the class directly */
+interface SoaServiceLike {
+  startService(notebookPath: string): Promise<SoaServiceInfo>;
+  stopService(serviceName: string): Promise<void>;
+  callService(serviceName: string, path: string, params?: unknown): Promise<unknown>;
+  listServices(): SoaServiceInfo[];
+}
+
+/**
+ * Resolve all %soa directives in source code.
+ *
+ * Syntax:
+ *   %soa notebook.ipynb           → start service from notebook
+ *   %soa.call service /path {}    → call a service endpoint
+ *   %soa.stop service             → stop a running service
+ *   %soa.list                     → list available services
+ *
+ * Each directive is replaced with Python code (comment or result injection).
+ */
+export async function resolveSoa(
+  source: string,
+  soaService: SoaServiceLike,
+  ctx: ResolveContext,
+): Promise<string> {
+  const lines = source.split('\n');
+  const resultLines: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // %soa.list
+    if (trimmed === '%soa.list') {
+      try {
+        const services = soaService.listServices();
+        const listing = services.map(s =>
+          `  ${s.name} v${s.version} [${s.status}] — ${s.endpoints.length} endpoint(s) (${s.peerName})`
+        ).join('\\n');
+        resultLines.push(`print("Services SOA disponibles:\\n${listing || '  (aucun)'}")`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        resultLines.push(`print("SOA list error: ${msg.replace(/"/g, '\\"')}")`);
+      }
+      continue;
+    }
+
+    // %soa.stop service
+    const stopMatch = trimmed.match(/^%soa\.stop\s+(\S+)$/);
+    if (stopMatch) {
+      const serviceName = stopMatch[1];
+      try {
+        await soaService.stopService(serviceName);
+        resultLines.push(`# SOA: service "${serviceName}" arrete`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        resultLines.push(`raise RuntimeError("SOA stop: ${msg.replace(/"/g, '\\"')}")`);
+      }
+      continue;
+    }
+
+    // %soa.call service /path {json}
+    const callMatch = trimmed.match(/^%soa\.call\s+(\S+)\s+(\/\S+)\s*(.*)$/);
+    if (callMatch) {
+      const serviceName = callMatch[1];
+      const endpointPath = callMatch[2];
+      const paramsStr = callMatch[3].trim() || '{}';
+      let params: unknown;
+      try {
+        params = JSON.parse(paramsStr);
+      } catch {
+        resultLines.push(`raise ValueError("SOA call: JSON params invalide: ${paramsStr.replace(/"/g, '\\"')}")`);
+        continue;
+      }
+      try {
+        const result = await soaService.callService(serviceName, endpointPath, params);
+        const resultJson = JSON.stringify(result).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        resultLines.push(`import json as __soa_json`);
+        resultLines.push(`__soa_result = __soa_json.loads('${resultJson}')`);
+        resultLines.push(`# SOA: resultat de ${serviceName}${endpointPath} -> __soa_result`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        resultLines.push(`raise ConnectionError("SOA call: ${msg.replace(/"/g, '\\"')}")`);
+      }
+      continue;
+    }
+
+    // %soa notebook.ipynb — start a service
+    const startMatch = trimmed.match(/^%soa\s+(\S+\.ipynb)$/);
+    if (startMatch) {
+      const target = startMatch[1];
+      const notebookPath = resolveNotebookPath(target, ctx);
+      if (!notebookPath) {
+        resultLines.push(`raise FileNotFoundError("SOA: impossible de resoudre le chemin '${target}'")`);
+        continue;
+      }
+      try {
+        const info = await soaService.startService(notebookPath);
+        const endpointList = info.endpoints.map(e => `${e.method} ${e.path}`).join(', ');
+        resultLines.push(`# SOA: service "${info.name}" v${info.version} demarre (${endpointList})`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        resultLines.push(`raise RuntimeError("SOA: ${msg.replace(/"/g, '\\"')}")`);
+      }
+      continue;
+    }
+
+    // Not a %soa directive — keep the line as-is
+    resultLines.push(line);
+  }
+
+  return resultLines.join('\n');
 }
