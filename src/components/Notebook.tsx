@@ -22,6 +22,14 @@ import { createCell } from '../utils/notebook';
 // Keep kernel services per notebook
 const kernelServices = new Map<string, KernelService>();
 
+/** Disconnect and remove all kernel services (call when Jupyter stops) */
+export function clearKernelServices(): void {
+  for (const [, ks] of kernelServices) {
+    ks.disconnect();
+  }
+  kernelServices.clear();
+}
+
 export function Notebook() {
   const notebook = useStore((s) => s.getActiveNotebook());
   const jupyterRunning = useStore((s) => s.jupyterRunning);
@@ -445,11 +453,32 @@ export function Notebook() {
 
   const restartKernel = useCallback(async () => {
     if (!nbId) return;
-    const ks = kernelServices.get(nbId);
-    if (ks) {
-      await ks.restartKernel();
+
+    // If Jupyter is not running, start it first
+    if (!store.getState().jupyterRunning) {
+      const result = await window.labAPI.jupyter.start();
+      if (!result.success) return;
+      store.getState().setJupyterRunning(true, result.port, result.token);
     }
-  }, [nbId]);
+
+    // Clean up old stale kernel service
+    const oldKs = kernelServices.get(nbId);
+    if (oldKs) {
+      try {
+        if (oldKs.isConnected()) {
+          await oldKs.restartKernel();
+          return; // Restart succeeded via existing connection
+        }
+      } catch {
+        // Connection stale, fall through to create fresh kernel
+      }
+      oldKs.disconnect();
+      kernelServices.delete(nbId);
+    }
+
+    // Create a fresh kernel
+    await getOrCreateKernel();
+  }, [nbId, getOrCreateKernel]);
 
   const interruptKernel = useCallback(async () => {
     if (!nbId) return;
@@ -458,6 +487,27 @@ export function Notebook() {
       await ks.interruptKernel();
     }
   }, [nbId]);
+
+  const startKernel = useCallback(async () => {
+    await getOrCreateKernel();
+  }, [getOrCreateKernel]);
+
+  const stopKernel = useCallback(async () => {
+    if (!nbId) return;
+    const ks = kernelServices.get(nbId);
+    if (ks) {
+      await ks.shutdownKernel();
+      kernelServices.delete(nbId);
+    }
+    store.getState().setKernelState(nbId, 'disconnected');
+    store.getState().setKernelId(nbId, null);
+  }, [nbId]);
+
+  const stopJupyter = useCallback(async () => {
+    await window.labAPI.jupyter.stop();
+    clearKernelServices();
+    store.getState().setJupyterRunning(false);
+  }, []);
 
   const focusCellByOffset = useCallback(
     (currentId: string, offset: number) => {
@@ -708,7 +758,10 @@ export function Notebook() {
         onAddMarkdownCell={() => store.getState().addCell(nbId!, 'markdown')}
         onRestartKernel={restartKernel}
         onInterruptKernel={interruptKernel}
+        onStopKernel={stopKernel}
+        onStartKernel={startKernel}
         onStartJupyter={startJupyter}
+        onStopJupyter={stopJupyter}
         onShareCID={handleShareCID}
         onToggleAutocomplete={() => store.getState().setAutocompleteEnabled(!autocompleteEnabled)}
         showCellPanel={showCellPanel}

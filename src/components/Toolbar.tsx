@@ -19,6 +19,7 @@ import {
   List,
   Search,
   FileDown,
+  PowerOff,
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -35,7 +36,10 @@ interface ToolbarProps {
   onAddMarkdownCell: () => void;
   onRestartKernel: () => void;
   onInterruptKernel: () => void;
+  onStopKernel: () => void;
+  onStartKernel: () => void;
   onStartJupyter: () => void;
+  onStopJupyter: () => void;
   onShareCID: () => void;
   onToggleAutocomplete: () => void;
   showCellPanel: boolean;
@@ -60,7 +64,10 @@ export function Toolbar({
   onAddMarkdownCell,
   onRestartKernel,
   onInterruptKernel,
+  onStopKernel,
+  onStartKernel,
   onStartJupyter,
+  onStopJupyter,
   onShareCID,
   onToggleAutocomplete,
   showCellPanel,
@@ -108,51 +115,141 @@ export function Toolbar({
 
       <div className="w-px h-5 bg-slate-700/50 mx-1" />
 
-      {jupyterRunning ? (
-        <>
-          <button
-            onClick={onRunAll}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-emerald-400 hover:bg-emerald-500/20"
-            title="Executer tout"
-          >
-            <Play className="w-3.5 h-3.5" />
-            <span>Run All</span>
-          </button>
+      {(() => {
+        const kernelAlive = jupyterRunning && kernelState !== 'disconnected' && kernelState !== 'dead';
+        const kernelDead = jupyterRunning && (kernelState === 'disconnected' || kernelState === 'dead');
 
-          <button
-            onClick={onInterruptKernel}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:bg-slate-700/50"
-            title="Interrompre"
-          >
-            <Square className="w-3 h-3" />
-          </button>
+        if (!jupyterRunning) {
+          // === Jupyter OFF ===
+          return (
+            <>
+              <button
+                onClick={onStartJupyter}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs text-amber-400 hover:bg-amber-500/20 transition-colors"
+                title="Demarrer le serveur Jupyter et un kernel Python"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Demarrer Jupyter</span>
+              </button>
 
-          <button
-            onClick={onRestartKernel}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:bg-slate-700/50"
-            title="Redemarrer kernel"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
+              <button
+                onClick={onRestartKernel}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:bg-slate-700/50 transition-colors"
+                title="Demarrer Jupyter et creer un nouveau kernel"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </>
+          );
+        }
 
-          <button
-            onClick={onTogglePip}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:bg-slate-700/50"
-            title="Packages Python (pip)"
-          >
-            <Package className="w-3.5 h-3.5" />
-          </button>
-        </>
-      ) : (
-        <button
-          onClick={onStartJupyter}
-          className="flex items-center gap-1 px-2.5 py-1 rounded text-xs text-amber-400 hover:bg-amber-500/20"
-          title="Demarrer Jupyter"
-        >
-          <Zap className="w-3.5 h-3.5" />
-          <span>Demarrer Jupyter</span>
-        </button>
-      )}
+        if (kernelDead) {
+          // === Jupyter ON, kernel mort/deconnecte ===
+          return (
+            <>
+              <button
+                onClick={onStartKernel}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs text-amber-400 hover:bg-amber-500/20 transition-colors"
+                title="Demarrer un nouveau kernel Python"
+              >
+                <Play className="w-3.5 h-3.5" />
+                <span>Demarrer kernel</span>
+              </button>
+
+              <button
+                onClick={onRestartKernel}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                title="Redemarrer : creer un nouveau kernel"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                onClick={onStopJupyter}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-500 hover:bg-red-500/10 hover:text-red-400/70 transition-colors"
+                title="Arreter le serveur Jupyter"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <PowerOff className="w-2.5 h-2.5" />
+              </button>
+
+              <button
+                onClick={onTogglePip}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:bg-slate-700/50 transition-colors"
+                title="Gerer les packages Python (pip install)"
+              >
+                <Package className="w-3.5 h-3.5" />
+              </button>
+            </>
+          );
+        }
+
+        // === Jupyter ON, kernel vivant (idle/busy/starting) ===
+        return (
+          <>
+            <button
+              onClick={onRunAll}
+              className={cn(
+                'flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors',
+                kernelState === 'busy'
+                  ? 'text-amber-400 bg-amber-500/10'
+                  : 'text-emerald-400 hover:bg-emerald-500/20'
+              )}
+              title={kernelState === 'busy' ? 'Kernel occupe — execution en cours' : 'Executer toutes les cellules (Cmd+Enter)'}
+            >
+              <Play className="w-3.5 h-3.5" />
+              <span>Run All</span>
+            </button>
+
+            <button
+              onClick={onInterruptKernel}
+              className={cn(
+                'flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors',
+                kernelState === 'busy'
+                  ? 'text-amber-400 hover:bg-amber-500/20'
+                  : 'text-slate-600 cursor-default'
+              )}
+              disabled={kernelState !== 'busy'}
+              title={kernelState === 'busy' ? 'Interrompre l\'execution en cours (Cmd+I)' : 'Aucune execution en cours'}
+            >
+              <Square className="w-3 h-3" />
+            </button>
+
+            <button
+              onClick={onStopKernel}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-400/70 hover:bg-red-500/20 transition-colors"
+              title="Arreter le kernel — le kernel sera detruit et les variables perdues"
+            >
+              <PowerOff className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={onRestartKernel}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:bg-slate-700/50 transition-colors"
+              title="Redemarrer le kernel — les variables seront reinitialises"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={onStopJupyter}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-500 hover:bg-red-500/10 hover:text-red-400/70 transition-colors"
+              title="Arreter le serveur Jupyter completement"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <PowerOff className="w-2.5 h-2.5" />
+            </button>
+
+            <button
+              onClick={onTogglePip}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:bg-slate-700/50 transition-colors"
+              title="Gerer les packages Python (pip install)"
+            >
+              <Package className="w-3.5 h-3.5" />
+            </button>
+          </>
+        );
+      })()}
 
       <div className="w-px h-5 bg-slate-700/50 mx-1" />
 

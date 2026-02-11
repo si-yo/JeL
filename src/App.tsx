@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { ProjectSidebar } from './components/ProjectSidebar';
-import { Notebook } from './components/Notebook';
+import { Notebook, clearKernelServices } from './components/Notebook';
 import { CommandHelper } from './components/CommandHelper';
 import { TutorialOverlay } from './components/tutorial/TutorialOverlay';
 import { RedoBranchPicker } from './components/RedoBranchPicker';
@@ -61,6 +61,7 @@ export default function App() {
 
         case 'stop-jupyter':
           await window.labAPI.jupyter.stop();
+          clearKernelServices();
           useStore.getState().setJupyterRunning(false);
           break;
 
@@ -96,6 +97,7 @@ export default function App() {
           const openResult = await window.labAPI.project.open(dirResult.filePaths[0]);
           if (openResult.success && openResult.project) {
             useStore.getState().setCurrentProject(openResult.project);
+            clearKernelServices();
             useStore.getState().setJupyterRunning(false); // Jupyter stopped during project switch
             useStore.getState().addFavorite({
               path: openResult.project.path,
@@ -109,6 +111,7 @@ export default function App() {
 
         case 'close-project':
           await window.labAPI.project.close();
+          clearKernelServices();
           useStore.getState().setCurrentProject(null);
           useStore.getState().setJupyterRunning(false);
           break;
@@ -121,6 +124,7 @@ export default function App() {
   // Listen for jupyter server stop
   useEffect(() => {
     const cleanup = window.labAPI.jupyter.onStopped(() => {
+      clearKernelServices();
       useStore.getState().setJupyterRunning(false);
     });
     return cleanup;
