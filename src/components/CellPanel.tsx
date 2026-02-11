@@ -6,7 +6,9 @@ import type { Cell } from '../types';
 interface CellPanelProps {
   cells: Cell[];
   hiddenCellIds: Set<string>;
+  showCodeCellIds: Set<string>;
   onToggleHidden: (cellId: string) => void;
+  onToggleShowCode: (cellId: string) => void;
   onShowAll: () => void;
   onHideAll: () => void;
   onUpdateLabel: (cellId: string, label: string) => void;
@@ -17,7 +19,9 @@ interface CellPanelProps {
 export function CellPanel({
   cells,
   hiddenCellIds,
+  showCodeCellIds,
   onToggleHidden,
+  onToggleShowCode,
   onShowAll,
   onHideAll,
   onUpdateLabel,
@@ -113,6 +117,7 @@ export function CellPanel({
         {cells.map((cell, index) => {
           const label = (cell.metadata?.label as string) || '';
           const isHidden = hiddenCellIds.has(cell.id);
+          const isCodeShown = showCodeCellIds.has(cell.id);
           const isEditing = editingCellId === cell.id;
           const preview = label || cell.source.split('\n')[0]?.slice(0, 40) || '(vide)';
 
@@ -167,6 +172,22 @@ export function CellPanel({
                   </span>
                 )}
               </div>
+
+              {/* Show code toggle (code cells only) */}
+              {cell.cell_type === 'code' && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleShowCode(cell.id); }}
+                  className={cn(
+                    'p-0.5 rounded shrink-0',
+                    isCodeShown
+                      ? 'text-cyan-400 hover:text-cyan-300'
+                      : 'text-slate-600 hover:text-slate-400'
+                  )}
+                  title={isCodeShown ? 'Masquer le code' : 'Afficher le code'}
+                >
+                  <Code className="w-3 h-3" />
+                </button>
+              )}
 
               {/* Visibility toggle */}
               <button

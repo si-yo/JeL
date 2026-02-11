@@ -27,6 +27,7 @@ interface CellProps {
   isSelected: boolean;
   autocompleteEnabled: boolean;
   viewMode?: boolean;
+  showCode?: boolean;
   label?: string;
   remotePeers?: RemotePeerInfo[];
   onCellClick: (e: React.MouseEvent) => void;
@@ -49,6 +50,7 @@ export function Cell({
   isSelected,
   autocompleteEnabled,
   viewMode,
+  showCode,
   label,
   remotePeers,
   onCellClick,
@@ -281,8 +283,8 @@ export function Cell({
       </div>
       )}
 
-      {/* Editor — hidden in view mode */}
-      {!viewMode && (
+      {/* Editor — hidden in view mode (unless showCode) */}
+      {!viewMode ? (
       <div className="px-1">
         <CellEditor
           source={cell.source}
@@ -296,7 +298,9 @@ export function Cell({
           autoFocus={isActive}
         />
       </div>
-      )}
+      ) : viewMode && showCode && cell.cell_type === 'code' && cell.source.trim() ? (
+        <pre className="px-4 py-2 text-xs font-mono text-slate-400 bg-slate-800/30 border-b border-slate-700/30 overflow-x-auto whitespace-pre">{cell.source}</pre>
+      ) : null}
 
       {/* Outputs */}
       {cell.cell_type === 'code' && cell.outputs.length > 0 && (

@@ -15,6 +15,7 @@ export interface ExportOptions {
   notebookId: string;
   notebooks: OpenNotebook[];
   hiddenCellIds?: Set<string>;
+  showCodeCellIds?: Set<string>;
 }
 
 function getTextContent(text: string | string[] | undefined): string {
@@ -96,7 +97,7 @@ function renderRichData(data: Record<string, string | string[]>): string {
   return '';
 }
 
-function renderCellHtml(cell: Cell, hiddenCellIds?: Set<string>): string {
+function renderCellHtml(cell: Cell, hiddenCellIds?: Set<string>, showCodeCellIds?: Set<string>): string {
   if (hiddenCellIds?.has(cell.id)) return '';
 
   if (cell.cell_type === 'markdown') {
@@ -105,21 +106,30 @@ function renderCellHtml(cell: Cell, hiddenCellIds?: Set<string>): string {
     return `<div class="cell markdown-cell">${html}</div>`;
   }
 
-  // Code cell: only render outputs, skip source
-  if (cell.outputs.length === 0) return '';
-
+  // Code cell
+  const showSource = showCodeCellIds?.has(cell.id) && cell.source.trim();
   const outputsHtml = cell.outputs
     .map(renderOutputHtml)
     .filter(Boolean)
     .join('\n');
 
-  if (!outputsHtml) return '';
-  return `<div class="cell code-cell-output">${outputsHtml}</div>`;
+  if (!showSource && !outputsHtml) return '';
+
+  let html = '';
+  if (showSource) {
+    const escaped = cell.source.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    html += `<pre class="code-source">${escaped}</pre>`;
+  }
+  if (outputsHtml) {
+    html += outputsHtml;
+  }
+
+  return `<div class="cell code-cell-output">${html}</div>`;
 }
 
-function renderNotebookHtml(notebook: OpenNotebook, hiddenCellIds?: Set<string>): string {
+function renderNotebookHtml(notebook: OpenNotebook, hiddenCellIds?: Set<string>, showCodeCellIds?: Set<string>): string {
   const cellsHtml = notebook.data.cells
-    .map((cell) => renderCellHtml(cell, hiddenCellIds))
+    .map((cell) => renderCellHtml(cell, hiddenCellIds, showCodeCellIds))
     .filter(Boolean)
     .join('\n');
 
@@ -160,7 +170,7 @@ function processLinks(html: string, includedNames: Set<string>): string {
 }
 
 export function generatePdfHtml(options: ExportOptions): string {
-  const { scope, notebookId, notebooks, hiddenCellIds } = options;
+  const { scope, notebookId, notebooks, hiddenCellIds, showCodeCellIds } = options;
 
   const activeNotebook = notebooks.find((n) => n.id === notebookId);
   if (!activeNotebook) return '';
@@ -212,7 +222,7 @@ export function generatePdfHtml(options: ExportOptions): string {
     const name = nb.fileName.replace('.ipynb', '');
     const pageBreak = idx > 0 ? ' page-break' : '';
     const title = `<div class="notebook-title${pageBreak}" id="notebook-${name}">${nb.fileName}</div>`;
-    let content = renderNotebookHtml(nb, nb.id === notebookId ? hiddenCellIds : undefined);
+    let content = renderNotebookHtml(nb, nb.id === notebookId ? hiddenCellIds : undefined, nb.id === notebookId ? showCodeCellIds : undefined);
     content = processLinks(content, includedNames);
     sections.push(title + '\n' + content);
   });
@@ -285,6 +295,7 @@ export function generatePdfHtml(options: ExportOptions): string {
   }
   .page-break { page-break-before: always; }
   .cell { margin-bottom: 12px; }
+  .code-source { background: #f0f0f4; border-left: 3px solid #6366f1; color: #27272a; margin-bottom: 4px; }
   .stream { color: #27272a; }
   .html-output { overflow-x: auto; }
   .svg-output { overflow-x: auto; }

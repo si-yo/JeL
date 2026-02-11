@@ -49,6 +49,7 @@ export function Notebook() {
   const [showCellPanel, setShowCellPanel] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showCodeCellIds, setShowCodeCellIds] = useState<Set<string>>(new Set());
   const cellRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastBroadcast = useRef(0);
@@ -200,6 +201,65 @@ export function Notebook() {
 
   const runAll = useCallback(async () => {
     if (!notebook) return;
+
+    const ks = await getOrCreateKernel();
+    if (!ks) return;
+
+    // Collect %use dependencies and pre-run them
+    const useDeps = new Set<string>();
+    const useRegex = /^%use\s+(\S+)/gm;
+    for (const cell of notebook.data.cells) {
+      if (cell.cell_type !== 'code') continue;
+      useRegex.lastIndex = 0;
+      let m;
+      while ((m = useRegex.exec(cell.source)) !== null) {
+        const raw = m[1].trim();
+        const colonIdx = raw.lastIndexOf(':');
+        const nbPath = colonIdx > 0 && !raw.substring(colonIdx).includes('/')
+          ? raw.substring(0, colonIdx).trim()
+          : raw;
+        useDeps.add(nbPath);
+      }
+    }
+
+    if (useDeps.size > 0) {
+      const project = store.getState().currentProject;
+      const { parseNotebook } = await import('../utils/notebook');
+
+      for (const dep of useDeps) {
+        // Resolve path
+        let depPath: string | null = null;
+        if (dep.startsWith('/')) {
+          depPath = dep;
+        } else if (notebook.filePath) {
+          const dir = notebook.filePath.substring(0, notebook.filePath.lastIndexOf('/'));
+          depPath = `${dir}/${dep}`;
+        } else if (project?.path) {
+          depPath = `${project.path}/${dep}`;
+        }
+        if (!depPath) continue;
+
+        const fileResult = await window.labAPI.fs.readFile(depPath);
+        if (!fileResult.success || !fileResult.data) continue;
+
+        let depNb;
+        try {
+          depNb = parseNotebook(fileResult.data);
+        } catch {
+          continue;
+        }
+
+        // Execute each code cell from the dependency, awaiting completion
+        for (const depCell of depNb.cells) {
+          if (depCell.cell_type !== 'code' || !depCell.source.trim()) continue;
+          await new Promise<void>((resolve) => {
+            ks.executeCode(depCell.source, () => {}, () => resolve(), () => {});
+          });
+        }
+      }
+    }
+
+    // Run main notebook cells
     for (const cell of notebook.data.cells) {
       if (cell.cell_type === 'code') {
         await new Promise<void>((resolve) => {
@@ -209,7 +269,7 @@ export function Notebook() {
         });
       }
     }
-  }, [notebook, runCell]);
+  }, [notebook, runCell, getOrCreateKernel]);
 
   // Handle bridge run-cell events from mobile clients
   useEffect(() => {
@@ -545,13 +605,14 @@ export function Notebook() {
       notebookId: nbId,
       notebooks: allNotebooks,
       hiddenCellIds,
+      showCodeCellIds,
     });
     const title = scope === 'project'
       ? currentProject?.name || 'project'
       : notebook?.fileName.replace('.ipynb', '') || 'notebook';
     await window.labAPI.notebook.exportPDF({ html, title });
     setShowExportDialog(false);
-  }, [nbId, notebook, currentProject, hiddenCellIds]);
+  }, [nbId, notebook, currentProject, hiddenCellIds, showCodeCellIds]);
 
   // Expose save handlers for menu events
   (window as unknown as Record<string, unknown>).__labSave = handleSave;
@@ -661,6 +722,7 @@ export function Notebook() {
               isSelected={selectedCellIds.has(cell.id)}
               autocompleteEnabled={autocompleteEnabled}
               viewMode={viewMode}
+              showCode={showCodeCellIds.has(cell.id)}
               label={cellLabel}
               remotePeers={remotePeersOnCell.length > 0 ? remotePeersOnCell : undefined}
               onCellClick={(e) => handleCellClick(cell.id, e)}
@@ -711,8 +773,17 @@ export function Notebook() {
         <CellPanel
           cells={notebook.data.cells}
           hiddenCellIds={hiddenCellIds}
+          showCodeCellIds={showCodeCellIds}
           onToggleHidden={(cellId) => {
             setHiddenCellIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(cellId)) next.delete(cellId);
+              else next.add(cellId);
+              return next;
+            });
+          }}
+          onToggleShowCode={(cellId) => {
+            setShowCodeCellIds((prev) => {
               const next = new Set(prev);
               if (next.has(cellId)) next.delete(cellId);
               else next.add(cellId);
