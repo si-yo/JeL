@@ -58,6 +58,11 @@ function getSpawnEnv() {
     env.VIRTUAL_ENV = currentVenvPath;
     env.PATH = `${binDir}${path.delimiter}${env.PATH}`;
     delete env.PYTHONHOME;
+    // Ensure Jupyter finds kernel specs installed in the venv
+    const venvShareJupyter = path.join(currentVenvPath, 'share', 'jupyter');
+    env.JUPYTER_PATH = env.JUPYTER_PATH
+      ? `${venvShareJupyter}${path.delimiter}${env.JUPYTER_PATH}`
+      : venvShareJupyter;
   }
   return env;
 }
@@ -76,6 +81,51 @@ function getVenvJupyter() {
   return JUPYTER_BIN;
 }
 
+function spawnAsync(cmd, args, opts) {
+  return new Promise((resolve) => {
+    const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+    let stdout = '', stderr = '';
+    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.on('error', (err) => resolve({ code: -1, stdout, stderr, error: err.message }));
+    proc.on('exit', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+async function ensureKernelSpec(venvDir) {
+  const pyBin = path.join(venvDir, 'bin', 'python3');
+  const kernelDir = path.join(venvDir, 'share', 'jupyter', 'kernels', 'python3');
+
+  if (fsSync.existsSync(kernelDir)) {
+    console.log('[Venv] Kernel spec already exists');
+    return true;
+  }
+
+  console.log('[Venv] Installing ipykernel + kernel spec...');
+  if (mainWindow) mainWindow.webContents.send('venv:creating', { path: venvDir, step: 'ipykernel' });
+
+  // Install ipykernel
+  const installResult = await spawnAsync(pyBin, ['-m', 'pip', 'install', '-q', 'ipykernel'], {
+    env: { ...process.env, VIRTUAL_ENV: venvDir, PATH: `${path.join(venvDir, 'bin')}${path.delimiter}${process.env.PATH}` },
+  });
+  if (installResult.code !== 0) {
+    console.error('[Venv] ipykernel install failed:', installResult.stderr);
+    return false;
+  }
+
+  // Register kernel spec inside venv (--sys-prefix)
+  const specResult = await spawnAsync(pyBin, ['-m', 'ipykernel', 'install', '--sys-prefix', '--name', 'python3', '--display-name', 'Python 3 (venv)'], {
+    env: { ...process.env, VIRTUAL_ENV: venvDir, PATH: `${path.join(venvDir, 'bin')}${path.delimiter}${process.env.PATH}` },
+  });
+  if (specResult.code !== 0) {
+    console.error('[Venv] kernel spec install failed:', specResult.stderr);
+    return false;
+  }
+
+  console.log('[Venv] Kernel spec installed');
+  return true;
+}
+
 async function ensureVenv(projectDir) {
   const venvDir = path.join(projectDir, '.venv');
   currentVenvPath = venvDir;
@@ -84,38 +134,29 @@ async function ensureVenv(projectDir) {
   if (fsSync.existsSync(pyBin)) {
     console.log('[Venv] Found existing:', venvDir);
     venvReady = true;
+    // Ensure kernel spec is set up even for existing venvs
+    await ensureKernelSpec(venvDir);
     return { success: true, created: false, path: venvDir };
   }
 
   console.log('[Venv] Creating:', venvDir);
   if (mainWindow) mainWindow.webContents.send('venv:creating', { path: venvDir });
 
-  return new Promise((resolve) => {
-    const proc = spawn('python3', ['-m', 'venv', venvDir], {
-      env: { ...process.env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stderr = '';
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
-    proc.on('error', (err) => {
-      console.error('[Venv] Error:', err.message);
-      currentVenvPath = null;
-      venvReady = false;
-      resolve({ success: false, error: err.message });
-    });
-    proc.on('exit', (code) => {
-      if (code === 0) {
-        console.log('[Venv] Created successfully');
-        venvReady = true;
-        resolve({ success: true, created: true, path: venvDir });
-      } else {
-        console.error('[Venv] Creation failed:', stderr);
-        currentVenvPath = null;
-        venvReady = false;
-        resolve({ success: false, error: stderr || `Exit code ${code}` });
-      }
-    });
-  });
+  const result = await spawnAsync('python3', ['-m', 'venv', venvDir], { env: { ...process.env } });
+  if (result.code !== 0) {
+    console.error('[Venv] Creation failed:', result.stderr);
+    currentVenvPath = null;
+    venvReady = false;
+    return { success: false, error: result.stderr || `Exit code ${result.code}` };
+  }
+
+  console.log('[Venv] Created successfully');
+  venvReady = true;
+
+  // Install ipykernel and register kernel spec
+  await ensureKernelSpec(venvDir);
+
+  return { success: true, created: true, path: venvDir };
 }
 
 function clearVenvState() {
@@ -583,6 +624,53 @@ ipcMain.handle('dialog:saveFile', async (_event, options = {}) => {
     ...options,
   });
   return result;
+});
+
+// ===========================================
+// PDF Export
+// ===========================================
+
+ipcMain.handle('notebook:exportPDF', async (_event, { html, title }) => {
+  try {
+    const printWin = new BrowserWindow({
+      show: false,
+      width: 800,
+      height: 600,
+      webPreferences: { offscreen: true },
+    });
+
+    await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+    // Wait for images/content to load
+    await printWin.webContents.executeJavaScript(
+      'new Promise(r => { if (document.readyState === "complete") r(); else window.addEventListener("load", r); })'
+    );
+    // Extra delay for image rendering
+    await new Promise((r) => setTimeout(r, 500));
+
+    const pdfBuffer = await printWin.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'A4',
+      margins: { marginType: 'custom', top: 1, bottom: 1, left: 1, right: 1 },
+    });
+
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: `${title || 'export'}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+
+    if (!result.canceled && result.filePath) {
+      await fs.writeFile(result.filePath, pdfBuffer);
+      printWin.destroy();
+      return { success: true, path: result.filePath };
+    }
+
+    printWin.destroy();
+    return { success: false };
+  } catch (err) {
+    console.error('[PDF Export] Error:', err);
+    return { success: false, error: err.message };
+  }
 });
 
 // ===========================================

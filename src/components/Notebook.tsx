@@ -5,8 +5,12 @@ import { Toolbar } from './Toolbar';
 import { NotebookLinks } from './NotebookLinks';
 import { HistoryPanel } from './HistoryPanel';
 import { RemoteCursors } from './RemoteCursors';
-import { Plus, GitBranch } from 'lucide-react';
+import { Plus, GitBranch, EyeOff, List } from 'lucide-react';
 import { PipPanel } from './PipPanel';
+import { CellPanel } from './CellPanel';
+import { SearchOverlay } from './SearchOverlay';
+import { ExportPdfDialog } from './ExportPdfDialog';
+import { generatePdfHtml, type ExportScope } from '../services/pdfExportService';
 import type { KernelState, CellOutput, NotebookLink } from '../types';
 import { KernelService } from '../services/kernelService';
 import { getCollab, broadcastCursor } from '../services/collabBridge';
@@ -40,6 +44,11 @@ export function Notebook() {
   const [runningCells, setRunningCells] = useState<Set<string>>(new Set());
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set());
   const [showPip, setShowPip] = useState(false);
+  const [viewMode, setViewMode] = useState(false);
+  const [hiddenCellIds, setHiddenCellIds] = useState<Set<string>>(new Set());
+  const [showCellPanel, setShowCellPanel] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
   const cellRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastBroadcast = useRef(0);
@@ -395,6 +404,13 @@ export function Notebook() {
     const handler = (e: KeyboardEvent) => {
       if (!notebook || !nbId) return;
 
+      // Cmd+F / Ctrl+F: open search
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f' && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        setShowSearch(true);
+        return;
+      }
+
       // Escape clears selection (no modifier needed)
       if (e.key === 'Escape' && selectedCellIds.size > 0) {
         e.preventDefault();
@@ -514,6 +530,29 @@ export function Notebook() {
     [currentProject]
   );
 
+  // Check if notebook has .ipynb links in markdown cells
+  const hasLinkedNotebooks = useMemo(() => {
+    if (!notebook) return false;
+    const regex = /\[.*?\]\(.*?\.ipynb\)/;
+    return notebook.data.cells.some((c) => c.cell_type === 'markdown' && regex.test(c.source));
+  }, [notebook]);
+
+  const handleExportPdf = useCallback(async (scope: ExportScope) => {
+    if (!nbId) return;
+    const allNotebooks = store.getState().notebooks;
+    const html = generatePdfHtml({
+      scope,
+      notebookId: nbId,
+      notebooks: allNotebooks,
+      hiddenCellIds,
+    });
+    const title = scope === 'project'
+      ? currentProject?.name || 'project'
+      : notebook?.fileName.replace('.ipynb', '') || 'notebook';
+    await window.labAPI.notebook.exportPDF({ html, title });
+    setShowExportDialog(false);
+  }, [nbId, notebook, currentProject, hiddenCellIds]);
+
   // Expose save handlers for menu events
   (window as unknown as Record<string, unknown>).__labSave = handleSave;
   (window as unknown as Record<string, unknown>).__labSaveAs = handleSaveAs;
@@ -539,7 +578,7 @@ export function Notebook() {
           {notebook.fileName}
         </span>
         <button
-          onClick={toggleHistoryPanel}
+          onClick={() => { toggleHistoryPanel(); if (!historyPanelOpen) setShowCellPanel(false); }}
           className={`p-1 rounded transition-colors ${historyPanelOpen ? 'text-violet-400 bg-violet-500/10' : 'text-slate-600 hover:text-slate-400'}`}
           title="Historique (Ctrl+Alt+H)"
         >
@@ -554,6 +593,7 @@ export function Notebook() {
         peerCount={peers.length}
         ipfsRunning={ipfsRunning}
         autocompleteEnabled={autocompleteEnabled}
+        viewMode={viewMode}
         onSave={handleSave}
         onRunAll={runAll}
         onAddCodeCell={() => store.getState().addCell(nbId!, 'code')}
@@ -563,7 +603,15 @@ export function Notebook() {
         onStartJupyter={startJupyter}
         onShareCID={handleShareCID}
         onToggleAutocomplete={() => store.getState().setAutocompleteEnabled(!autocompleteEnabled)}
+        showCellPanel={showCellPanel}
         onTogglePip={() => setShowPip((v) => !v)}
+        onToggleViewMode={() => setViewMode((v) => !v)}
+        onToggleCellPanel={() => {
+          setShowCellPanel((v) => !v);
+          if (!showCellPanel && historyPanelOpen) toggleHistoryPanel();
+        }}
+        onToggleSearch={() => setShowSearch(true)}
+        onExportPdf={() => setShowExportDialog(true)}
       />
 
       {showPip && <PipPanel onClose={() => setShowPip(false)} />}
@@ -577,6 +625,28 @@ export function Notebook() {
 
         <div className="max-w-4xl mx-auto">
           {notebook.data.cells.map((cell, index) => {
+            const isHidden = hiddenCellIds.has(cell.id);
+            const cellLabel = (cell.metadata?.label as string) || '';
+
+            // In view mode, hidden cells are completely invisible
+            if (isHidden && viewMode) return null;
+
+            // In edit mode, hidden cells show collapsed placeholder
+            if (isHidden && !viewMode) {
+              return (
+                <div
+                  key={cell.id}
+                  className="mb-2 px-3 py-1.5 rounded-lg border border-dashed border-slate-700/40 bg-slate-800/10 flex items-center gap-2 cursor-pointer hover:border-slate-600/50"
+                  onClick={() => setHiddenCellIds((prev) => { const next = new Set(prev); next.delete(cell.id); return next; })}
+                >
+                  <EyeOff className="w-3 h-3 text-slate-600" />
+                  <span className="text-xs text-slate-600">
+                    Cellule masquee{cellLabel ? `: ${cellLabel}` : ''}
+                  </span>
+                </div>
+              );
+            }
+
             const remotePeersOnCell = Object.values(remoteCursors)
               .filter((rc) => rc.notebookPath === nbPath && rc.cellId === cell.id && rc.visible !== false)
               .map((rc) => ({ peerId: rc.peerId, peerName: rc.peerName }));
@@ -590,6 +660,8 @@ export function Notebook() {
               isRunning={runningCells.has(cell.id)}
               isSelected={selectedCellIds.has(cell.id)}
               autocompleteEnabled={autocompleteEnabled}
+              viewMode={viewMode}
+              label={cellLabel}
               remotePeers={remotePeersOnCell.length > 0 ? remotePeersOnCell : undefined}
               onCellClick={(e) => handleCellClick(cell.id, e)}
               onSourceChange={(source) =>
@@ -615,7 +687,8 @@ export function Notebook() {
             );
           })}
 
-          {/* Add cell button at bottom */}
+          {/* Add cell button at bottom — hidden in view mode */}
+          {!viewMode && (
           <div className="flex justify-center py-4">
             <button
               onClick={() => store.getState().addCell(nbId!, 'code')}
@@ -625,12 +698,72 @@ export function Notebook() {
               Ajouter une cellule
             </button>
           </div>
+          )}
         </div>
       </div>
       </div>
 
       {/* History panel */}
       {historyPanelOpen && nbId && <HistoryPanel notebookId={nbId} />}
+
+      {/* Cell panel */}
+      {showCellPanel && notebook && (
+        <CellPanel
+          cells={notebook.data.cells}
+          hiddenCellIds={hiddenCellIds}
+          onToggleHidden={(cellId) => {
+            setHiddenCellIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(cellId)) next.delete(cellId);
+              else next.add(cellId);
+              return next;
+            });
+          }}
+          onShowAll={() => setHiddenCellIds(new Set())}
+          onHideAll={() => {
+            if (notebook) setHiddenCellIds(new Set(notebook.data.cells.map((c) => c.id)));
+          }}
+          onUpdateLabel={(cellId, label) => {
+            store.getState().updateCellMetadata(nbId!, cellId, { label: label || undefined });
+          }}
+          onNavigateToCell={(cellId) => {
+            setActiveCellId(cellId);
+            // Scroll into view
+            const el = cellRefs.current.get(cellId);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }}
+          onClose={() => setShowCellPanel(false)}
+        />
+      )}
+
+      {/* Export PDF dialog */}
+      {showExportDialog && notebook && (
+        <ExportPdfDialog
+          notebookName={notebook.fileName}
+          hasLinkedNotebooks={hasLinkedNotebooks}
+          hasProject={!!currentProject}
+          onExport={handleExportPdf}
+          onClose={() => setShowExportDialog(false)}
+        />
+      )}
+
+      {/* Search overlay */}
+      {showSearch && (
+        <SearchOverlay
+          notebooks={store.getState().notebooks}
+          onNavigate={(notebookId, cellId) => {
+            if (notebookId !== nbId) {
+              store.getState().setActiveNotebook(notebookId);
+            }
+            setActiveCellId(cellId);
+            setTimeout(() => {
+              const el = cellRefs.current.get(cellId);
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+          }}
+          onClose={() => setShowSearch(false)}
+        />
+      )}
     </div>
   );
 }

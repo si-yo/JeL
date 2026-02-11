@@ -85,6 +85,11 @@ contextBridge.exposeInMainWorld('labAPI', {
     },
   },
 
+  // Notebook export
+  notebook: {
+    exportPDF: (data) => ipcRenderer.invoke('notebook:exportPDF', data),
+  },
+
   // Pip package manager
   pip: {
     install: (params) => ipcRenderer.invoke('pip:install', params),

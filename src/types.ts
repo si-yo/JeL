@@ -205,6 +205,10 @@ declare global {
         onPubsubMessage: (callback: (msg: { topic: string; data: string }) => void) => () => void;
       };
 
+      notebook: {
+        exportPDF: (data: { html: string; title: string }) => Promise<{ success: boolean; path?: string }>;
+      };
+
       pip: {
         install: (params: { packages: string | string[] }) => Promise<{ success: boolean; output?: string; error?: string; code?: number }>;
         list: () => Promise<{ success: boolean; packages?: Array<{ name: string; version: string }>; error?: string }>;

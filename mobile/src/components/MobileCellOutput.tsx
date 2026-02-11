@@ -1,8 +1,16 @@
-import type { CellOutput as CellOutputType } from '../types';
-import { cn } from '../utils/cn';
 import { marked } from 'marked';
 
 marked.setOptions({ breaks: true, gfm: true });
+
+type CellOutput = {
+  output_type: string;
+  name?: string;
+  text?: string | string[];
+  data?: Record<string, string | string[]>;
+  ename?: string;
+  evalue?: string;
+  traceback?: string[];
+};
 
 function getTextContent(text: string | string[] | undefined): string {
   if (!text) return '';
@@ -10,10 +18,9 @@ function getTextContent(text: string | string[] | undefined): string {
 }
 
 function RichOutput({ data }: { data: Record<string, string | string[]> }) {
-  // Priority: HTML > Markdown > LaTeX > image > text
   if (data['text/html']) {
     const html = getTextContent(data['text/html']);
-    return <div dangerouslySetInnerHTML={{ __html: html }} />;
+    return <div className="overflow-x-auto" dangerouslySetInnerHTML={{ __html: html }} />;
   }
 
   if (data['text/markdown']) {
@@ -24,36 +31,36 @@ function RichOutput({ data }: { data: Record<string, string | string[]> }) {
 
   if (data['text/latex']) {
     const latex = getTextContent(data['text/latex']);
-    return <pre>{latex}</pre>;
+    return <pre className="cell-output text-slate-300">{latex}</pre>;
   }
 
   if (data['image/png']) {
     const src = `data:image/png;base64,${getTextContent(data['image/png'])}`;
-    return <img src={src} alt="output" />;
+    return <img src={src} alt="output" className="max-w-full" />;
   }
 
   if (data['image/jpeg']) {
     const src = `data:image/jpeg;base64,${getTextContent(data['image/jpeg'])}`;
-    return <img src={src} alt="output" />;
+    return <img src={src} alt="output" className="max-w-full" />;
   }
 
   if (data['image/svg+xml']) {
     const svg = getTextContent(data['image/svg+xml']);
-    return <div dangerouslySetInnerHTML={{ __html: svg }} />;
+    return <div className="overflow-x-auto" dangerouslySetInnerHTML={{ __html: svg }} />;
   }
 
   if (data['text/plain']) {
-    return <pre>{getTextContent(data['text/plain'])}</pre>;
+    return <pre className="cell-output text-slate-300">{getTextContent(data['text/plain'])}</pre>;
   }
 
   return null;
 }
 
-function SingleOutput({ output }: { output: CellOutputType }) {
+function SingleOutput({ output }: { output: CellOutput }) {
   switch (output.output_type) {
     case 'stream':
       return (
-        <pre className={cn(output.name === 'stderr' ? 'text-red-400' : 'text-slate-300')}>
+        <pre className={`cell-output ${output.name === 'stderr' ? 'text-red-400' : 'text-slate-400'}`}>
           {getTextContent(output.text)}
         </pre>
       );
@@ -64,17 +71,14 @@ function SingleOutput({ output }: { output: CellOutputType }) {
 
     case 'error':
       return (
-        <div className="text-red-400">
-          <pre className="font-bold">{output.ename}: {output.evalue}</pre>
-          {output.traceback?.map((line, i) => (
-            <pre
-              key={i}
-              dangerouslySetInnerHTML={{
-                __html: line
-                  .replace(/\x1b\[([0-9;]*)m/g, '')
-              }}
-            />
-          ))}
+        <div>
+          <span className="text-xs font-bold text-red-400">{output.ename}: </span>
+          <span className="text-xs text-red-300">{output.evalue}</span>
+          {output.traceback && (
+            <pre className="cell-output text-red-400/70 mt-1 text-[11px]">
+              {output.traceback.join('\n').replace(/\x1b\[[0-9;]*m/g, '')}
+            </pre>
+          )}
         </div>
       );
 
@@ -83,11 +87,11 @@ function SingleOutput({ output }: { output: CellOutputType }) {
   }
 }
 
-export function CellOutputView({ outputs }: { outputs: CellOutputType[] }) {
+export function MobileCellOutputView({ outputs }: { outputs: CellOutput[] }) {
   if (outputs.length === 0) return null;
 
   return (
-    <div className="cell-output px-4 py-2 border-t border-slate-700/50 bg-slate-900/30 text-sm">
+    <div className="cell-output px-3 py-2 text-sm">
       {outputs.map((output, i) => (
         <SingleOutput key={i} output={output} />
       ))}

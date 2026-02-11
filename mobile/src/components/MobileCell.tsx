@@ -1,6 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Play, FileText, Code, Loader2, Trash2, ArrowUp, ArrowDown, RefreshCw, Plus } from 'lucide-react';
 import type { CellData } from '../services/wsBridge';
+import { MobileCellOutputView } from './MobileCellOutput';
+import { marked } from 'marked';
+
+marked.setOptions({ breaks: true, gfm: true });
 
 interface Props {
   cell: CellData;
@@ -8,6 +12,7 @@ interface Props {
   index: number;
   totalCells: number;
   running: boolean;
+  viewMode?: boolean;
   onUpdateSource: (source: string) => void;
   onRun: () => void;
   onDelete: () => void;
@@ -17,7 +22,7 @@ interface Props {
   onAddCellAfter: (type: 'code' | 'markdown') => void;
 }
 
-export function MobileCell({ cell, index, totalCells, running, onUpdateSource, onRun, onDelete, onToggleType, onMoveUp, onMoveDown, onAddCellAfter }: Props) {
+export function MobileCell({ cell, index, totalCells, running, viewMode, onUpdateSource, onRun, onDelete, onToggleType, onMoveUp, onMoveDown, onAddCellAfter }: Props) {
   const [editing, setEditing] = useState(false);
   const [localSource, setLocalSource] = useState(cell.source);
   const [showActions, setShowActions] = useState(false);
@@ -44,9 +49,22 @@ export function MobileCell({ cell, index, totalCells, running, onUpdateSource, o
   const isCode = cell.cell_type === 'code';
   const hasOutput = cell.outputs.length > 0;
 
+  const renderedMarkdown = useMemo(() => {
+    if (cell.cell_type !== 'markdown' || !cell.source) return '';
+    return marked.parse(cell.source) as string;
+  }, [cell.cell_type, cell.source]);
+
+  // In view mode, hide empty cells and code cells with no output
+  if (viewMode) {
+    const isEmpty = !cell.source.trim();
+    if (isCode && isEmpty && !hasOutput) return null;
+    if (!isCode && isEmpty) return null;
+  }
+
   return (
     <div className="border border-slate-700/50 rounded-lg overflow-hidden">
-      {/* Cell header */}
+      {/* Cell header — hidden in view mode */}
+      {!viewMode && (
       <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-800/50 border-b border-slate-700/30">
         <button
           onClick={onToggleType}
@@ -88,9 +106,10 @@ export function MobileCell({ cell, index, totalCells, running, onUpdateSource, o
           )}
         </div>
       </div>
+      )}
 
-      {/* Actions bar */}
-      {showActions && (
+      {/* Actions bar — hidden in view mode */}
+      {!viewMode && showActions && (
         <div className="flex items-center gap-1 px-2 py-1.5 bg-slate-800/80 border-b border-slate-700/30">
           <button
             onClick={onMoveUp}
@@ -139,63 +158,45 @@ export function MobileCell({ cell, index, totalCells, running, onUpdateSource, o
         </div>
       )}
 
-      {/* Cell source */}
-      {editing ? (
-        <textarea
-          ref={textareaRef}
-          value={localSource}
-          onChange={(e) => setLocalSource(e.target.value)}
-          onBlur={handleBlur}
-          className="cell-source w-full bg-slate-900 text-slate-200 px-3 py-2 outline-none border-none min-h-[40px]"
-          autoFocus
-        />
-      ) : (
+      {/* Cell source — hidden in view mode */}
+      {!viewMode && (
+        editing ? (
+          <textarea
+            ref={textareaRef}
+            value={localSource}
+            onChange={(e) => setLocalSource(e.target.value)}
+            onBlur={handleBlur}
+            className="cell-source w-full bg-slate-900 text-slate-200 px-3 py-2 outline-none border-none min-h-[40px]"
+            autoFocus
+          />
+        ) : (
+          <div
+            onClick={() => setEditing(true)}
+            className="px-3 py-2 min-h-[40px] cursor-text"
+          >
+            {cell.source ? (
+              <pre className="text-[13px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                {cell.source}
+              </pre>
+            ) : (
+              <span className="text-[11px] text-slate-600 italic">Touchez pour editer</span>
+            )}
+          </div>
+        )
+      )}
+
+      {/* Markdown rendered preview in view mode */}
+      {viewMode && !isCode && cell.source && (
         <div
-          onClick={() => setEditing(true)}
-          className="px-3 py-2 min-h-[40px] cursor-text"
-        >
-          {cell.source ? (
-            <pre className="text-[13px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-              {cell.source}
-            </pre>
-          ) : (
-            <span className="text-[11px] text-slate-600 italic">Touchez pour editer</span>
-          )}
-        </div>
+          className="markdown-body px-3 py-2"
+          dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
+        />
       )}
 
       {/* Cell outputs */}
       {hasOutput && (
-        <div className="border-t border-slate-700/30 bg-slate-950/40 px-3 py-2">
-          {cell.outputs.map((output, i) => (
-            <div key={i}>
-              {output.output_type === 'stream' && (
-                <pre className="cell-output text-slate-400">
-                  {Array.isArray(output.text) ? output.text.join('') : output.text}
-                </pre>
-              )}
-              {(output.output_type === 'execute_result' || output.output_type === 'display_data') && (
-                <pre className="cell-output text-slate-300">
-                  {output.data?.['text/plain']
-                    ? Array.isArray(output.data['text/plain'])
-                      ? output.data['text/plain'].join('')
-                      : output.data['text/plain']
-                    : ''}
-                </pre>
-              )}
-              {output.output_type === 'error' && (
-                <div>
-                  <span className="text-xs font-bold text-red-400">{output.ename}: </span>
-                  <span className="text-xs text-red-300">{output.evalue}</span>
-                  {output.traceback && (
-                    <pre className="cell-output text-red-400/70 mt-1 text-[11px]">
-                      {output.traceback.join('\n').replace(/\x1b\[[0-9;]*m/g, '')}
-                    </pre>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
+        <div className={viewMode ? '' : 'border-t border-slate-700/30 bg-slate-950/40'}>
+          <MobileCellOutputView outputs={cell.outputs} />
         </div>
       )}
     </div>

@@ -1,11 +1,12 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useCallback } from 'react';
 import { cn } from '../utils/cn';
 import { CellEditor, focusCellEditor } from './CellEditor';
 import { CellOutputView } from './CellOutput';
 import type { Cell as CellType } from '../types';
-import { Play, Trash2, ChevronUp, ChevronDown, Code, Type } from 'lucide-react';
+import { Play, Trash2, ChevronUp, ChevronDown, Code, Type, Tag } from 'lucide-react';
 import { marked } from 'marked';
 import { getPeerColor } from '../utils/peerColors';
+import { useStore } from '../store/useStore';
 
 // Configure marked for safe rendering
 marked.setOptions({
@@ -25,6 +26,8 @@ interface CellProps {
   isRunning: boolean;
   isSelected: boolean;
   autocompleteEnabled: boolean;
+  viewMode?: boolean;
+  label?: string;
   remotePeers?: RemotePeerInfo[];
   onCellClick: (e: React.MouseEvent) => void;
   onSourceChange: (source: string) => void;
@@ -45,6 +48,8 @@ export function Cell({
   isRunning,
   isSelected,
   autocompleteEnabled,
+  viewMode,
+  label,
   remotePeers,
   onCellClick,
   onSourceChange,
@@ -64,6 +69,75 @@ export function Cell({
     return marked.parse(cell.source) as string;
   }, [cell.cell_type, cell.source]);
 
+  const handleMarkdownClick = useCallback(async (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const anchor = target.closest('a');
+    if (!anchor) return;
+
+    const href = anchor.getAttribute('href');
+    if (!href) return;
+
+    // Handle .ipynb links — open as notebook in the app
+    if (href.endsWith('.ipynb')) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const project = useStore.getState().currentProject;
+      const notebooks = useStore.getState().notebooks;
+      const activeNb = useStore.getState().getActiveNotebook();
+
+      // Resolve path relative to the current notebook or project
+      let filePath = href;
+      if (!href.startsWith('/')) {
+        const baseDir = activeNb?.filePath
+          ? activeNb.filePath.substring(0, activeNb.filePath.lastIndexOf('/'))
+          : project?.path;
+        if (baseDir) {
+          filePath = `${baseDir}/${href}`;
+        }
+      }
+
+      // Check if already open
+      const existing = notebooks.find((n) => n.filePath === filePath);
+      if (existing) {
+        useStore.getState().setActiveNotebook(existing.id);
+        return;
+      }
+
+      // Open the notebook
+      const fileResult = await window.labAPI.fs.readFile(filePath);
+      if (!fileResult.success || !fileResult.data) return;
+
+      const { parseNotebook } = await import('../utils/notebook');
+      const { v4: uuidv4 } = await import('uuid');
+      const data = parseNotebook(fileResult.data);
+      const fileName = href.split('/').pop() || 'notebook.ipynb';
+
+      useStore.getState().addNotebook({
+        id: uuidv4(),
+        filePath,
+        fileName,
+        data,
+        dirty: false,
+        kernelId: null,
+      });
+      return;
+    }
+
+    // External links — open in browser
+    if (href.startsWith('http://') || href.startsWith('https://')) {
+      e.preventDefault();
+      window.open(href, '_blank');
+    }
+  }, []);
+
+  // In view mode, hide empty cells and code cells with no output
+  if (viewMode) {
+    const isEmpty = !cell.source.trim();
+    if (cell.cell_type === 'code' && isEmpty && cell.outputs.length === 0) return null;
+    if (cell.cell_type === 'markdown' && isEmpty) return null;
+  }
+
   const execLabel =
     cell.cell_type === 'code'
       ? cell.execution_count !== null
@@ -81,25 +155,30 @@ export function Cell({
       ref={containerRef}
       className={cn(
         'group relative rounded-lg transition-colors mb-2',
-        hasPeers ? 'border-l-[3px]' : 'border',
-        isSelected && isActive
-          ? 'border-indigo-500/60 bg-slate-800/50 ring-2 ring-cyan-500/30'
-          : isSelected
-          ? 'border-cyan-500/50 bg-cyan-950/20'
-          : isActive
-          ? hasPeers ? 'border border-l-[3px] bg-slate-800/50' : 'border-indigo-500/60 bg-slate-800/50'
-          : hasPeers ? 'border border-l-[3px] bg-slate-800/20 hover:border-slate-600/60' : 'border-slate-700/40 bg-slate-800/20 hover:border-slate-600/60'
+        viewMode
+          ? 'border border-slate-700/20 bg-transparent'
+          : hasPeers ? 'border-l-[3px]' : 'border',
+        !viewMode && (
+          isSelected && isActive
+            ? 'border-indigo-500/60 bg-slate-800/50 ring-2 ring-cyan-500/30'
+            : isSelected
+            ? 'border-cyan-500/50 bg-cyan-950/20'
+            : isActive
+            ? hasPeers ? 'border border-l-[3px] bg-slate-800/50' : 'border-indigo-500/60 bg-slate-800/50'
+            : hasPeers ? 'border border-l-[3px] bg-slate-800/20 hover:border-slate-600/60' : 'border-slate-700/40 bg-slate-800/20 hover:border-slate-600/60'
+        )
       )}
-      style={hasPeers && !isSelected ? {
+      style={!viewMode && hasPeers && !isSelected ? {
         borderLeftColor: primaryPeerColor!.border,
         borderTopColor: undefined,
         borderRightColor: undefined,
         borderBottomColor: undefined,
         boxShadow: `inset 3px 0 12px -4px ${primaryPeerColor!.bg}`,
       } : undefined}
-      onClick={onCellClick}
+      onClick={viewMode ? undefined : onCellClick}
     >
-      {/* Cell header */}
+      {/* Cell header — hidden in view mode */}
+      {!viewMode && (
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-700/30">
         {/* Execution count */}
         <span className="text-xs font-mono text-slate-500 w-10 text-right shrink-0">
@@ -117,6 +196,14 @@ export function Cell({
         >
           {cell.cell_type}
         </span>
+
+        {/* Cell label badge */}
+        {label && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300/80 truncate max-w-[140px] flex items-center gap-0.5">
+            <Tag className="w-2.5 h-2.5 shrink-0" />
+            {label}
+          </span>
+        )}
 
         {/* Remote peer cursors */}
         {hasPeers && (
@@ -192,8 +279,10 @@ export function Cell({
           </button>
         </div>
       </div>
+      )}
 
-      {/* Editor */}
+      {/* Editor — hidden in view mode */}
+      {!viewMode && (
       <div className="px-1">
         <CellEditor
           source={cell.source}
@@ -207,16 +296,20 @@ export function Cell({
           autoFocus={isActive}
         />
       </div>
-
-      {/* Outputs */}
-      {cell.cell_type === 'code' && (
-        <CellOutputView outputs={cell.outputs} />
       )}
 
-      {/* Markdown rendered preview */}
-      {cell.cell_type === 'markdown' && cell.source && !isActive && (
+      {/* Outputs */}
+      {cell.cell_type === 'code' && cell.outputs.length > 0 && (
+        <div onClick={(e) => e.stopPropagation()} className="select-text cursor-text">
+          <CellOutputView outputs={cell.outputs} />
+        </div>
+      )}
+
+      {/* Markdown rendered preview — in viewMode always show, in edit mode show when !isActive */}
+      {cell.cell_type === 'markdown' && cell.source && (viewMode || !isActive) && (
         <div
           className="markdown-body px-4 py-3"
+          onClick={handleMarkdownClick}
           dangerouslySetInnerHTML={{ __html: renderedMarkdown }}
         />
       )}

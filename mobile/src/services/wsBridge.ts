@@ -29,6 +29,7 @@ export interface CellData {
     traceback?: string[];
   }>;
   execution_count: number | null;
+  metadata?: Record<string, unknown>;
 }
 
 export interface NotebookData {

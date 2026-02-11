@@ -86,6 +86,7 @@ interface LabStore {
   appendCellOutput: (notebookId: string, cellId: string, output: CellOutput) => void;
   setCellExecutionCount: (notebookId: string, cellId: string, count: number | null) => void;
   clearCellOutputs: (notebookId: string, cellId: string) => void;
+  updateCellMetadata: (notebookId: string, cellId: string, metadata: Record<string, unknown>) => void;
   moveCellUp: (notebookId: string, cellId: string) => void;
   moveCellDown: (notebookId: string, cellId: string) => void;
   insertCellsAfter: (notebookId: string, afterCellId: string | null, cells: Cell[]) => void;
@@ -327,6 +328,23 @@ export const useStore = create<LabStore>((set, get) => ({
               c.id === cellId ? { ...c, outputs: [], execution_count: null } : c
             ),
           },
+        };
+      }),
+    })),
+
+  updateCellMetadata: (notebookId, cellId, metadata) =>
+    set((s) => ({
+      notebooks: s.notebooks.map((n) => {
+        if (n.id !== notebookId) return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            cells: n.data.cells.map((c) =>
+              c.id === cellId ? { ...c, metadata: { ...c.metadata, ...metadata } } : c
+            ),
+          },
+          dirty: true,
         };
       }),
     })),

@@ -14,6 +14,11 @@ import {
   Users,
   Sparkles,
   Package,
+  Eye,
+  EyeOff,
+  List,
+  Search,
+  FileDown,
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -23,6 +28,7 @@ interface ToolbarProps {
   peerCount: number;
   ipfsRunning: boolean;
   autocompleteEnabled: boolean;
+  viewMode: boolean;
   onSave: () => void;
   onRunAll: () => void;
   onAddCodeCell: () => void;
@@ -32,7 +38,12 @@ interface ToolbarProps {
   onStartJupyter: () => void;
   onShareCID: () => void;
   onToggleAutocomplete: () => void;
+  showCellPanel: boolean;
   onTogglePip: () => void;
+  onToggleViewMode: () => void;
+  onToggleCellPanel: () => void;
+  onToggleSearch: () => void;
+  onExportPdf?: () => void;
 }
 
 export function Toolbar({
@@ -42,6 +53,7 @@ export function Toolbar({
   peerCount,
   ipfsRunning,
   autocompleteEnabled,
+  viewMode,
   onSave,
   onRunAll,
   onAddCodeCell,
@@ -51,7 +63,12 @@ export function Toolbar({
   onStartJupyter,
   onShareCID,
   onToggleAutocomplete,
+  showCellPanel,
   onTogglePip,
+  onToggleViewMode,
+  onToggleCellPanel,
+  onToggleSearch,
+  onExportPdf,
 }: ToolbarProps) {
   return (
     <div className="flex items-center gap-1 px-3 py-1.5 border-b border-slate-700/50 bg-slate-800/60">
@@ -165,6 +182,56 @@ export function Toolbar({
             )}
           />
         </div>
+      </button>
+
+      {/* View mode toggle */}
+      <button
+        onClick={onToggleViewMode}
+        className={cn(
+          'flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors',
+          viewMode
+            ? 'bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30'
+            : 'text-slate-500 hover:bg-slate-700/50 hover:text-slate-400'
+        )}
+        title={viewMode ? 'Mode edition' : 'Mode lecture'}
+      >
+        {viewMode ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+        <span>Vue</span>
+      </button>
+
+      {/* PDF Export (visible in view mode) */}
+      {viewMode && onExportPdf && (
+        <button
+          onClick={onExportPdf}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-500 hover:bg-slate-700/50 hover:text-slate-400 transition-colors"
+          title="Exporter en PDF"
+        >
+          <FileDown className="w-3.5 h-3.5" />
+          <span>PDF</span>
+        </button>
+      )}
+
+      {/* Cell panel toggle */}
+      <button
+        onClick={onToggleCellPanel}
+        className={cn(
+          'p-1 rounded transition-colors',
+          showCellPanel
+            ? 'text-amber-400 bg-amber-500/10'
+            : 'text-slate-500 hover:bg-slate-700/50 hover:text-slate-400'
+        )}
+        title="Panneau cellules"
+      >
+        <List className="w-4 h-4" />
+      </button>
+
+      {/* Search */}
+      <button
+        onClick={onToggleSearch}
+        className="p-1 rounded text-slate-500 hover:bg-slate-700/50 hover:text-slate-400 transition-colors"
+        title="Rechercher (Cmd+F)"
+      >
+        <Search className="w-4 h-4" />
       </button>
 
       <div className="flex-1" />

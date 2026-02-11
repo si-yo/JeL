@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, Play, Loader2, Plus, RotateCcw, Square, History, Package } from 'lucide-react';
+import { ChevronLeft, Play, Loader2, Plus, RotateCcw, Square, History, Package, Eye, EyeOff } from 'lucide-react';
 import { MobileCell } from './MobileCell';
 import { MobileHistory } from './MobileHistory';
 import { MobilePackages } from './MobilePackages';
@@ -21,6 +21,7 @@ export function MobileNotebook({ notebook, runningCells, kernelBusy, historyData
   const [runAllLoading, setRunAllLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showPackages, setShowPackages] = useState(false);
+  const [viewMode, setViewMode] = useState(false);
 
   const handleRunAll = () => {
     setRunAllLoading(true);
@@ -89,6 +90,13 @@ export function MobileNotebook({ notebook, runningCells, kernelBusy, historyData
           <Package className="w-3.5 h-3.5" />
         </button>
         <button
+          onClick={() => setViewMode((v) => !v)}
+          className={`p-1.5 rounded ${viewMode ? 'text-cyan-400 bg-cyan-500/15' : 'text-slate-500 hover:text-cyan-400'}`}
+          title={viewMode ? 'Mode edition' : 'Mode lecture'}
+        >
+          {viewMode ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+        </button>
+        <button
           onClick={handleRunAll}
           disabled={runAllLoading}
           className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 text-xs"
@@ -130,6 +138,7 @@ export function MobileNotebook({ notebook, runningCells, kernelBusy, historyData
             index={index}
             totalCells={notebook.cells.length}
             running={runningCells.has(cell.id)}
+            viewMode={viewMode}
             onUpdateSource={(source) => bridge.updateCell(notebook.id, cell.id, source)}
             onRun={() => bridge.runCell(notebook.id, cell.id)}
             onDelete={() => bridge.deleteCell(notebook.id, cell.id)}
@@ -140,7 +149,8 @@ export function MobileNotebook({ notebook, runningCells, kernelBusy, historyData
           />
         ))}
 
-        {/* Add cell button at bottom */}
+        {/* Add cell button at bottom — hidden in view mode */}
+        {!viewMode && (
         <div className="flex justify-center py-3 gap-2">
           <button
             onClick={() => bridge.addCell(notebook.id, 'code', notebook.cells.length - 1)}
@@ -157,6 +167,7 @@ export function MobileNotebook({ notebook, runningCells, kernelBusy, historyData
             Markdown
           </button>
         </div>
+        )}
       </div>
     </div>
   );
