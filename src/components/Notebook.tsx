@@ -45,19 +45,66 @@ export function Notebook() {
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set());
   const [showPip, setShowPip] = useState(false);
   const [viewMode, setViewMode] = useState(false);
-  const [hiddenCellIds, setHiddenCellIds] = useState<Set<string>>(new Set());
+  const [hiddenCellIds, setHiddenCellIds] = useState<Set<string>>(() => {
+    try {
+      const key = notebook?.filePath ? `jel:hidden:${notebook.filePath}` : null;
+      if (key) { const raw = localStorage.getItem(key); if (raw) return new Set(JSON.parse(raw)); }
+    } catch { /* ignore */ }
+    return new Set();
+  });
   const [showCellPanel, setShowCellPanel] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
-  const [showCodeCellIds, setShowCodeCellIds] = useState<Set<string>>(new Set());
+  const [showCodeCellIds, setShowCodeCellIds] = useState<Set<string>>(() => {
+    try {
+      const key = notebook?.filePath ? `jel:showCode:${notebook.filePath}` : null;
+      if (key) { const raw = localStorage.getItem(key); if (raw) return new Set(JSON.parse(raw)); }
+    } catch { /* ignore */ }
+    return new Set();
+  });
   const cellRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastBroadcast = useRef(0);
   const lastClickedCellId = useRef<string | null>(null);
 
   const nbId = notebook?.id;
+  const nbFilePath = notebook?.filePath;
   const kernelState: KernelState = (nbId && kernelStates[nbId]) || 'disconnected';
   const collabEnabled = useStore((s) => s.collabEnabled);
+
+  // Persist hiddenCellIds to localStorage
+  useEffect(() => {
+    if (!nbFilePath) return;
+    try {
+      const key = `jel:hidden:${nbFilePath}`;
+      if (hiddenCellIds.size > 0) localStorage.setItem(key, JSON.stringify([...hiddenCellIds]));
+      else localStorage.removeItem(key);
+    } catch { /* ignore */ }
+  }, [hiddenCellIds, nbFilePath]);
+
+  // Persist showCodeCellIds to localStorage
+  useEffect(() => {
+    if (!nbFilePath) return;
+    try {
+      const key = `jel:showCode:${nbFilePath}`;
+      if (showCodeCellIds.size > 0) localStorage.setItem(key, JSON.stringify([...showCodeCellIds]));
+      else localStorage.removeItem(key);
+    } catch { /* ignore */ }
+  }, [showCodeCellIds, nbFilePath]);
+
+  // Reload persisted sets when switching notebook
+  useEffect(() => {
+    if (!nbFilePath) return;
+    try {
+      const hRaw = localStorage.getItem(`jel:hidden:${nbFilePath}`);
+      setHiddenCellIds(hRaw ? new Set(JSON.parse(hRaw)) : new Set());
+      const scRaw = localStorage.getItem(`jel:showCode:${nbFilePath}`);
+      setShowCodeCellIds(scRaw ? new Set(JSON.parse(scRaw)) : new Set());
+    } catch {
+      setHiddenCellIds(new Set());
+      setShowCodeCellIds(new Set());
+    }
+  }, [nbFilePath]);
 
   // Stable notebook relative path for collab
   const nbPath = useMemo(() => {
@@ -697,6 +744,7 @@ export function Notebook() {
               return (
                 <div
                   key={cell.id}
+                  ref={(el) => { if (el) cellRefs.current.set(cell.id, el); else cellRefs.current.delete(cell.id); }}
                   className="mb-2 px-3 py-1.5 rounded-lg border border-dashed border-slate-700/40 bg-slate-800/10 flex items-center gap-2 cursor-pointer hover:border-slate-600/50"
                   onClick={() => setHiddenCellIds((prev) => { const next = new Set(prev); next.delete(cell.id); return next; })}
                 >
@@ -713,8 +761,8 @@ export function Notebook() {
               .map((rc) => ({ peerId: rc.peerId, peerName: rc.peerName }));
 
             return (
+            <div key={cell.id} ref={(el) => { if (el) cellRefs.current.set(cell.id, el); else cellRefs.current.delete(cell.id); }}>
             <Cell
-              key={cell.id}
               cell={cell}
               index={index}
               isActive={activeCellId === cell.id}
@@ -746,6 +794,7 @@ export function Notebook() {
               onFocusUp={() => focusCellByOffset(cell.id, -1)}
               onFocusDown={() => focusCellByOffset(cell.id, 1)}
             />
+            </div>
             );
           })}
 
@@ -772,6 +821,7 @@ export function Notebook() {
       {showCellPanel && notebook && (
         <CellPanel
           cells={notebook.data.cells}
+          activeCellId={activeCellId}
           hiddenCellIds={hiddenCellIds}
           showCodeCellIds={showCodeCellIds}
           onToggleHidden={(cellId) => {

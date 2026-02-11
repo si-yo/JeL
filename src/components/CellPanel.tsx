@@ -5,6 +5,7 @@ import type { Cell } from '../types';
 
 interface CellPanelProps {
   cells: Cell[];
+  activeCellId: string | null;
   hiddenCellIds: Set<string>;
   showCodeCellIds: Set<string>;
   onToggleHidden: (cellId: string) => void;
@@ -18,6 +19,7 @@ interface CellPanelProps {
 
 export function CellPanel({
   cells,
+  activeCellId,
   hiddenCellIds,
   showCodeCellIds,
   onToggleHidden,
@@ -33,6 +35,16 @@ export function CellPanel({
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const resizing = useRef(false);
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // Auto-scroll to active cell in the list
+  useEffect(() => {
+    if (!activeCellId) return;
+    const el = itemRefs.current.get(activeCellId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [activeCellId]);
 
   const handleResizeStart = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -121,12 +133,16 @@ export function CellPanel({
           const isEditing = editingCellId === cell.id;
           const preview = label || cell.source.split('\n')[0]?.slice(0, 40) || '(vide)';
 
+          const isActive = activeCellId === cell.id;
+
           return (
             <div
               key={cell.id}
+              ref={(el) => { if (el) itemRefs.current.set(cell.id, el); else itemRefs.current.delete(cell.id); }}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 border-b border-slate-800/50 cursor-pointer hover:bg-slate-800/40 transition-colors',
-                isHidden && 'opacity-50'
+                isHidden && 'opacity-50',
+                isActive && 'bg-indigo-500/15 border-l-2 border-l-indigo-500'
               )}
               onClick={() => onNavigateToCell(cell.id)}
             >
