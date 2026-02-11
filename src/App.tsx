@@ -1,11 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { ProjectSidebar } from './components/ProjectSidebar';
 import { Notebook } from './components/Notebook';
 import { CommandHelper } from './components/CommandHelper';
+import { TutorialOverlay } from './components/tutorial/TutorialOverlay';
+import { RedoBranchPicker } from './components/RedoBranchPicker';
 import { useStore, restoreSessionFromLocalStorage, restoreFavoritesFromLocalStorage, isRemoteUpdate, isHistoryRestore } from './store/useStore';
 import { initCollab, destroyCollab, broadcastCellUpdate, broadcastCellAdd, broadcastCellDelete, broadcastCellTypeChange, broadcastCellMove, broadcastNotebookState } from './services/collabBridge';
-import { startCapture, restoreSnapshot } from './services/historyCapture';
-import { useHistoryStore } from './store/useHistoryStore';
+import { startCapture, restoreSnapshot, flushPendingCapture } from './services/historyCapture';
+import { useHistoryStore, restoreHistoryFromLocalStorage } from './store/useHistoryStore';
+import { useTutorialStore } from './store/useTutorialStore';
 
 export default function App() {
   const createNewNotebook = useStore((s) => s.createNewNotebook);
@@ -543,7 +546,7 @@ export default function App() {
     return stop;
   }, []);
 
-  // Init history for newly opened notebooks
+  // Init history for newly opened notebooks & clean orphaned histories
   useEffect(() => {
     for (const nb of notebooks) {
       if (!useHistoryStore.getState().histories[nb.id]) {
@@ -556,45 +559,98 @@ export default function App() {
         useHistoryStore.getState().initHistory(nb.id, snapshots);
       }
     }
+    // Remove histories for notebooks that are no longer open
+    const openIds = new Set(notebooks.map((nb) => nb.id));
+    for (const nbId of Object.keys(useHistoryStore.getState().histories)) {
+      if (!openIds.has(nbId)) {
+        useHistoryStore.getState().removeHistory(nbId);
+      }
+    }
   }, [notebooks]);
 
-  // Keyboard shortcuts for undo/redo/toggle history panel
+  // ── Tree undo/redo helpers ──
+  const performUndo = useCallback(() => {
+    const activeNbId = useStore.getState().activeNotebookId;
+    if (!activeNbId) return;
+    flushPendingCapture(activeNbId);
+    const cells = useHistoryStore.getState().undo(activeNbId);
+    if (cells) {
+      restoreSnapshot(activeNbId, cells);
+      broadcastNotebookState(activeNbId, cells, 'undo');
+    }
+  }, []);
+
+  const performRedo = useCallback(() => {
+    const activeNbId = useStore.getState().activeNotebookId;
+    if (!activeNbId) return;
+    const children = useHistoryStore.getState().getRedoChildren(activeNbId);
+    if (children.length === 0) return;
+    if (children.length === 1) {
+      const cells = useHistoryStore.getState().redo(activeNbId);
+      if (cells) {
+        restoreSnapshot(activeNbId, cells);
+        broadcastNotebookState(activeNbId, cells, 'redo');
+      }
+    } else {
+      // Multiple branches → open picker
+      useHistoryStore.getState().setPendingRedoBranches({ notebookId: activeNbId, options: children });
+    }
+  }, []);
+
+  // Custom events from CellEditor (Ctrl+Z intercepted in CodeMirror)
+  useEffect(() => {
+    const onTreeUndo = () => performUndo();
+    const onTreeRedo = () => performRedo();
+    window.addEventListener('lab:tree-undo', onTreeUndo);
+    window.addEventListener('lab:tree-redo', onTreeRedo);
+    return () => {
+      window.removeEventListener('lab:tree-undo', onTreeUndo);
+      window.removeEventListener('lab:tree-redo', onTreeRedo);
+    };
+  }, [performUndo, performRedo]);
+
+  // Keyboard shortcuts for undo/redo/toggle history panel/toggle tutorial
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Ctrl+Alt+Z = Undo, Ctrl+Alt+Shift+Z = Redo, Ctrl+Alt+H = Toggle panel
       if (!e.ctrlKey && !e.metaKey) return;
-      if (!e.altKey) return;
 
-      const activeNbId = useStore.getState().activeNotebookId;
-      if (!activeNbId) return;
-
-      if (e.key === 'z' || e.key === 'Z') {
+      // Ctrl+Alt+T = Toggle tutorial
+      if (e.altKey && e.code === 'KeyT') {
         e.preventDefault();
-        if (e.shiftKey) {
-          const cells = useHistoryStore.getState().redo(activeNbId);
-          if (cells) {
-            restoreSnapshot(activeNbId, cells);
-            broadcastNotebookState(activeNbId, cells, 'redo');
-          }
-        } else {
-          const cells = useHistoryStore.getState().undo(activeNbId);
-          if (cells) {
-            restoreSnapshot(activeNbId, cells);
-            broadcastNotebookState(activeNbId, cells, 'undo');
-          }
-        }
-      } else if (e.key === 'h' || e.key === 'H') {
+        const ts = useTutorialStore.getState();
+        if (ts.isOpen) { ts.markTutorialSeen(); ts.close(); } else { ts.open(); }
+        return;
+      }
+
+      // Ctrl+Alt+H = Toggle history panel
+      if (e.altKey && e.code === 'KeyH') {
         e.preventDefault();
         useHistoryStore.getState().togglePanel();
+        return;
+      }
+
+      // Ctrl+Z / Ctrl+Shift+Z = Tree undo/redo (when focus is NOT in a CM editor)
+      if (e.code === 'KeyZ') {
+        // If focus is inside a CodeMirror editor, the cellKeymap custom event handles it
+        if (document.activeElement?.closest('.cm-content')) return;
+        e.preventDefault();
+        if (e.shiftKey) {
+          performRedo();
+        } else {
+          performUndo();
+        }
       }
     };
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [performUndo, performRedo]);
 
-  // Restore session from localStorage, or create initial notebook
+  // Restore session + history from localStorage, or create initial notebook
   useEffect(() => {
+    // Restore history trees first (before initHistory creates fresh ones)
+    restoreHistoryFromLocalStorage();
+
     if (notebooks.length === 0) {
       const restored = restoreSessionFromLocalStorage();
       if (!restored) {
@@ -603,11 +659,53 @@ export default function App() {
     }
   }, []);
 
+  // Auto-open tutorial on first launch
+  useEffect(() => {
+    const seen = localStorage.getItem('lab:tutorialSeen');
+    if (!seen) {
+      useTutorialStore.getState().open();
+    }
+  }, []);
+
+  const pendingRedo = useHistoryStore((s) => s.pendingRedoBranches);
+
+  const handleRedoBranchSelect = useCallback((nodeId: string) => {
+    const pending = useHistoryStore.getState().pendingRedoBranches;
+    if (!pending) return;
+    const cells = useHistoryStore.getState().goToNode(pending.notebookId, nodeId);
+    if (cells) {
+      restoreSnapshot(pending.notebookId, cells);
+      broadcastNotebookState(pending.notebookId, cells, 'redo');
+    }
+    useHistoryStore.getState().setPendingRedoBranches(null);
+  }, []);
+
+  const handleRedoBranchCancel = useCallback(() => {
+    useHistoryStore.getState().setPendingRedoBranches(null);
+  }, []);
+
+  // Get current cells for diff computation in the picker
+  const currentCellsForPicker = (() => {
+    if (!pendingRedo) return [];
+    const history = useHistoryStore.getState().histories[pendingRedo.notebookId];
+    if (!history) return [];
+    const current = history.nodes[history.currentNodeId];
+    return current?.cells ?? [];
+  })();
+
   return (
     <div className="flex h-full">
       <ProjectSidebar />
       <Notebook />
       <CommandHelper />
+      <TutorialOverlay />
+      {pendingRedo && (
+        <RedoBranchPicker
+          currentCells={currentCellsForPicker}
+          onSelect={handleRedoBranchSelect}
+          onCancel={handleRedoBranchCancel}
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { HelpCircle, X, Code, FileText, Link2, Share2, Zap, Sparkles, Shield, Smartphone } from 'lucide-react';
+import { HelpCircle, X, Code, FileText, Link2, Share2, Zap, Sparkles, Shield, Smartphone, BookOpen } from 'lucide-react';
+import { useTutorialStore } from '../store/useTutorialStore';
 
 interface Command {
   name: string;
@@ -105,15 +106,29 @@ const COMMANDS: Command[] = [
 export function CommandHelper() {
   const [open, setOpen] = useState(false);
 
+  const openTutorial = () => {
+    useTutorialStore.getState().open();
+    setOpen(false);
+  };
+
   if (!open) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className="fixed bottom-4 right-4 p-2.5 rounded-full bg-slate-800 border border-slate-700/50 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors shadow-lg z-50"
-        title="Commandes disponibles"
-      >
-        <HelpCircle className="w-5 h-5" />
-      </button>
+      <div className="fixed bottom-4 right-4 z-50 flex gap-2">
+        <button
+          onClick={openTutorial}
+          className="p-2.5 rounded-full bg-slate-800 border border-slate-700/50 text-indigo-400 hover:text-indigo-300 hover:bg-slate-700 transition-colors shadow-lg"
+          title="Guide interactif"
+        >
+          <BookOpen className="w-5 h-5" />
+        </button>
+        <button
+          onClick={() => setOpen(true)}
+          className="p-2.5 rounded-full bg-slate-800 border border-slate-700/50 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors shadow-lg"
+          title="Commandes disponibles"
+        >
+          <HelpCircle className="w-5 h-5" />
+        </button>
+      </div>
     );
   }
 
@@ -167,8 +182,17 @@ export function CommandHelper() {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-slate-700/30 text-[10px] text-slate-600">
-        Les chemins sont relatifs au notebook courant ou a la racine du projet.
+      <div className="px-4 py-2 border-t border-slate-700/30 flex items-center justify-between">
+        <span className="text-[10px] text-slate-600">
+          Les chemins sont relatifs au notebook courant ou a la racine du projet.
+        </span>
+        <button
+          onClick={openTutorial}
+          className="flex items-center gap-1 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors shrink-0 ml-2"
+        >
+          <BookOpen className="w-3 h-3" />
+          Guide interactif
+        </button>
       </div>
     </div>
   );

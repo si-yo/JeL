@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('labAPI', {
   // IPFS
   ipfs: {
     available: () => ipcRenderer.invoke('ipfs:available'),
+    repoExists: () => ipcRenderer.invoke('ipfs:repoExists'),
+    init: () => ipcRenderer.invoke('ipfs:init'),
     daemonStart: () => ipcRenderer.invoke('ipfs:daemonStart'),
     daemonStop: () => ipcRenderer.invoke('ipfs:daemonStop'),
     status: () => ipcRenderer.invoke('ipfs:status'),

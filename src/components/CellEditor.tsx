@@ -65,6 +65,20 @@ export function CellEditor({
 
     const cellKeymap = keymap.of([
       {
+        key: 'Mod-z',
+        run: () => {
+          window.dispatchEvent(new CustomEvent('lab:tree-undo'));
+          return true;
+        },
+      },
+      {
+        key: 'Mod-Shift-z',
+        run: () => {
+          window.dispatchEvent(new CustomEvent('lab:tree-redo'));
+          return true;
+        },
+      },
+      {
         key: 'Shift-Enter',
         run: () => {
           onRunRef.current();

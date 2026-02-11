@@ -217,6 +217,7 @@ function createWindow() {
       nodeIntegration: false,
       webSecurity: true,
     },
+    icon: path.join(__dirname, 'assets', 'icon.icns'),
     backgroundColor: '#0f172a',
     title: 'Lab',
     titleBarStyle: 'hiddenInset',
@@ -1048,6 +1049,28 @@ function getLocalIp() {
 ipcMain.handle('ipfs:available', async () => {
   const available = await checkIpfsAvailable();
   return { available };
+});
+
+ipcMain.handle('ipfs:repoExists', async () => {
+  try {
+    const configPath = path.join(IPFS_REPO(), 'config');
+    return { exists: fsSync.existsSync(configPath) };
+  } catch {
+    return { exists: false };
+  }
+});
+
+ipcMain.handle('ipfs:init', async () => {
+  try {
+    const configPath = path.join(IPFS_REPO(), 'config');
+    if (fsSync.existsSync(configPath)) {
+      return { success: true, message: 'already-initialized' };
+    }
+    await runIpfs(['init']);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('ipfs:daemonStart', async () => {

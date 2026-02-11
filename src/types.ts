@@ -182,6 +182,8 @@ declare global {
 
       ipfs: {
         available: () => Promise<{ available: boolean }>;
+        repoExists: () => Promise<{ exists: boolean }>;
+        init: () => Promise<{ success: boolean; message?: string; error?: string }>;
         daemonStart: () => Promise<{ success: boolean; error?: string }>;
         daemonStop: () => Promise<{ success: boolean; error?: string }>;
         status: () => Promise<{ running: boolean }>;

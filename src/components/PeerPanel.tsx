@@ -4,7 +4,7 @@ import { cn } from '../utils/cn';
 import {
   Circle, Zap, Share2, Smartphone, Copy, Check, Eye, EyeOff,
   Globe, Lock, Plus, Download, Trash2, KeyRound, ChevronDown, ChevronRight,
-  Link, RefreshCw, ExternalLink, User, FileText, FolderOpen,
+  Link, RefreshCw, ExternalLink, User, FileText, FolderOpen, Loader2, AlertTriangle,
 } from 'lucide-react';
 import type { Peer } from '../types';
 import { openPeerNotebook, forceSwarmRefresh, getOwnPeerId } from '../services/collabBridge';
@@ -262,6 +262,113 @@ function SwarmKeySection() {
               </button>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CidImportSection() {
+  const [expanded, setExpanded] = useState(false);
+  const [cid, setCid] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleImport = async () => {
+    const trimmed = cid.trim();
+    if (!trimmed) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await window.labAPI.ipfs.cat({ cid: trimmed });
+      if (!result.success || !result.data) {
+        setError(result.error || 'Impossible de recuperer le contenu depuis IPFS');
+        setLoading(false);
+        return;
+      }
+
+      // Validate that it's a proper Jupyter notebook
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(result.data);
+      } catch {
+        setError('Le contenu n\'est pas du JSON valide');
+        setLoading(false);
+        return;
+      }
+
+      if (!Array.isArray(parsed.cells) || typeof parsed.nbformat !== 'number') {
+        setError('Ce n\'est pas un notebook Jupyter valide (champs cells/nbformat manquants)');
+        setLoading(false);
+        return;
+      }
+
+      // Parse and add to open notebooks
+      const { parseNotebook } = await import('../utils/notebook');
+      const { v4: uuidv4 } = await import('uuid');
+      const data = parseNotebook(result.data);
+
+      useStore.getState().addNotebook({
+        id: uuidv4(),
+        filePath: null as unknown as string,
+        fileName: `ipfs-${trimmed.slice(0, 8)}.ipynb`,
+        data,
+        dirty: false,
+        kernelId: null,
+      });
+
+      setCid('');
+      setExpanded(false);
+    } catch (err) {
+      setError(String(err));
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="border-t border-slate-700/30 pt-2 mt-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 w-full mb-1"
+      >
+        {expanded ? <ChevronDown className="w-3 h-3 text-slate-500" /> : <ChevronRight className="w-3 h-3 text-slate-500" />}
+        <Download className="w-3 h-3 text-cyan-400" />
+        <span className="text-[10px] font-medium text-slate-300">Importer depuis CID</span>
+      </button>
+
+      {expanded && (
+        <div className="space-y-1.5 mt-1">
+          <p className="text-[9px] text-slate-600">
+            Collez un CID IPFS pour telecharger et ouvrir un notebook. Le contenu est verifie avant import.
+          </p>
+          <input
+            type="text"
+            value={cid}
+            onChange={(e) => { setCid(e.target.value); setError(null); }}
+            onKeyDown={(e) => e.key === 'Enter' && handleImport()}
+            placeholder="Qm... ou bafy..."
+            className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-[10px] text-slate-200 font-mono placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+            autoFocus
+          />
+          {error && (
+            <div className="flex items-start gap-1.5 text-[9px] text-red-400">
+              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+          <button
+            onClick={handleImport}
+            disabled={!cid.trim() || loading}
+            className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded text-[10px] font-medium bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 transition-colors disabled:opacity-40"
+          >
+            {loading ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Download className="w-3 h-3" />
+            )}
+            Telecharger et ouvrir
+          </button>
         </div>
       )}
     </div>
@@ -851,6 +958,9 @@ export function PeerPanel() {
                 </p>
               )}
             </div>
+
+            {/* ── Import notebook from CID */}
+            <CidImportSection />
 
             {/* ── Saved peer addrs (auto-reconnect) */}
             {savedPeerAddrs.length > 0 && (

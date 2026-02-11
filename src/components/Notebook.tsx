@@ -512,14 +512,14 @@ export function Notebook() {
       if (!notebook || !nbId) return;
 
       // Cmd+F / Ctrl+F: open search
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f' && !e.shiftKey && !e.altKey) {
+      if ((e.metaKey || e.ctrlKey) && e.code === 'KeyF' && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         setShowSearch(true);
         return;
       }
 
       // Escape clears selection (no modifier needed)
-      if (e.key === 'Escape' && selectedCellIds.size > 0) {
+      if (e.code === 'Escape' && selectedCellIds.size > 0) {
         e.preventDefault();
         setSelectedCellIds(new Set());
         return;
@@ -536,12 +536,12 @@ export function Notebook() {
       const effectiveIds = selectedCellIds.size > 0
         ? selectedCellIds
         : activeCellId ? new Set([activeCellId]) : new Set<string>();
-      if (effectiveIds.size === 0 && e.key !== 'v') return;
+      if (effectiveIds.size === 0 && e.code !== 'KeyV') return;
 
       // Get cells in document order
       const orderedCells = notebook.data.cells.filter((c) => effectiveIds.has(c.id));
 
-      if (e.key === 'c' && !e.shiftKey) {
+      if (e.code === 'KeyC' && !e.shiftKey) {
         if (orderedCells.length === 0) return;
         e.preventDefault();
         setCellClipboard(orderedCells.map((c) => ({
@@ -550,7 +550,7 @@ export function Notebook() {
           outputs: [...c.outputs],
           metadata: { ...c.metadata },
         })));
-      } else if (e.key === 'x' && !e.shiftKey) {
+      } else if (e.code === 'KeyX' && !e.shiftKey) {
         if (orderedCells.length === 0) return;
         e.preventDefault();
         setCellClipboard(orderedCells.map((c) => ({
@@ -565,7 +565,7 @@ export function Notebook() {
         if (remaining && remaining.length > 0) {
           setActiveCellId(remaining[0].id);
         }
-      } else if (e.key === 'v' && !e.shiftKey) {
+      } else if (e.code === 'KeyV' && !e.shiftKey) {
         const clip = getCellClipboard();
         if (clip.length === 0) return;
         e.preventDefault();
@@ -577,7 +577,7 @@ export function Notebook() {
         store.getState().insertCellsAfter(nbId, activeCellId, newCells);
         setSelectedCellIds(new Set());
         setTimeout(() => setActiveCellId(newCells[newCells.length - 1].id), 50);
-      } else if (e.key === 'a' && !e.shiftKey && !editorFocused) {
+      } else if (e.code === 'KeyA' && !e.shiftKey && !editorFocused) {
         e.preventDefault();
         setSelectedCellIds(new Set(notebook.data.cells.map((c) => c.id)));
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCellIds.size > 1 && !editorFocused) {

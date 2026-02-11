@@ -80,6 +80,27 @@ function pushAndBroadcast(
   }
 }
 
+/**
+ * Flush all pending debounced captures for a notebook.
+ * Call this before undo so that any in-progress text edits are committed first.
+ */
+export function flushPendingCapture(notebookId: string): void {
+  for (const [key, timer] of debounceTimers.entries()) {
+    if (key.startsWith(notebookId + ':')) {
+      clearTimeout(timer);
+      debounceTimers.delete(key);
+      if (isHistoryRestore()) continue;
+      const cellId = key.split(':')[1];
+      const nb = useStore.getState().notebooks.find((n) => n.id === notebookId);
+      if (nb) {
+        const cells = snapshotCells(nb.data.cells);
+        const notebookPath = getSharedNotebookPath(nb);
+        pushAndBroadcast(notebookId, notebookPath, { type: 'cell-update', cellId }, cells);
+      }
+    }
+  }
+}
+
 export function startCapture(): () => void {
   const unsub = useStore.subscribe((state, prev) => {
     if (isHistoryRestore()) return;
