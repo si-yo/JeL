@@ -2,12 +2,69 @@
 
 Editeur de notebooks Jupyter standalone, avec collaboration P2P en temps reel, gestion de packages Python, et interface mobile.
 
-## requirements
-- Node.js : https://nodejs.org/
-- python 3 (privilégier 3.10) : https://www.python.org
-- Jupyter Lab : https://jupyter.org/
-- IPFS Kubo (interplanetary filesystem on p2p based) : https://docs.ipfs.tech/install/command-line/#install-official-binary-distributions
+## Requirements
 
+- Node.js : https://nodejs.org/
+- Python 3 (privilégier 3.10) : https://www.python.org
+- Jupyter Lab : https://jupyter.org/
+- IPFS Kubo : https://docs.ipfs.tech/install/command-line/#install-official-binary-distributions
+
+### Scripts d'installation
+
+Trois scripts sont fournis dans `scripts/` :
+
+| Script | Role |
+|--------|------|
+| `install-requirements.sh` / `.ps1` | Installe les prerequis systeme (Node, Python, Jupyter, IPFS) |
+| `install-app.sh` / `.ps1` | Installe les dependances npm, build et optionnellement package l'app |
+
+#### 1. Installer les prerequis
+
+**macOS / Linux** :
+
+```bash
+./scripts/install-requirements.sh                         # Tout installer
+./scripts/install-requirements.sh --no-ipfs               # Sans IPFS
+./scripts/install-requirements.sh --no-jupyter --no-ipfs  # Node + Python seulement
+```
+
+**Windows** :
+
+```powershell
+.\scripts\install-requirements.ps1                        # Tout installer
+.\scripts\install-requirements.ps1 -NoIpfs                # Sans IPFS
+.\scripts\install-requirements.ps1 -NoJupyter -NoIpfs     # Node + Python seulement
+```
+
+Flags : `--no-node` / `-NoNode`, `--no-python` / `-NoPython`, `--no-jupyter` / `-NoJupyter`, `--no-ipfs` / `-NoIpfs`
+
+#### 2. Installer et builder l'app
+
+**macOS / Linux** :
+
+```bash
+./scripts/install-app.sh              # Install + build
+./scripts/install-app.sh --dev        # Install sans build (mode dev)
+./scripts/install-app.sh --package    # Install + build + package Electron (.app / .deb)
+```
+
+**Windows** :
+
+```powershell
+.\scripts\install-app.ps1             # Install + build
+.\scripts\install-app.ps1 -DevOnly    # Install sans build (mode dev)
+.\scripts\install-app.ps1 -Package    # Install + build + package Electron (.exe)
+```
+
+#### Installation complete en une commande
+
+```bash
+# macOS / Linux
+./scripts/install-requirements.sh && ./scripts/install-app.sh
+
+# Windows (PowerShell)
+.\scripts\install-requirements.ps1; .\scripts\install-app.ps1
+```
 
 ## Stack technique
 
@@ -127,18 +184,20 @@ Accessible depuis un telephone connecte au meme reseau :
 ## Demarrage
 
 ```bash
-# Installer les dependances
-npm install
-cd mobile && npm install && cd ..
-
-# Build complet (desktop + mobile)
-npm run build:all
+# Installation automatique (prerequis + app)
+./scripts/install-requirements.sh && ./scripts/install-app.sh
 
 # Lancer l'app
 npm start
 
 # Mode developpement (hot reload)
 npm run dev
+
+# --- OU manuellement ---
+npm install
+cd mobile && npm install && cd ..
+npm run build:all
+npm start
 ```
 
 ## Variables d'environnement
